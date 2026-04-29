@@ -1,0 +1,12 @@
+[alias]
+# Run clippy (all targets) with the `pyo3` feature enabled. Use:
+#   cargo lint
+# This keeps pyo3 disabled for normal builds/tests but enables it for linting.
+lint = "clippy --all-targets --features pyo3 -- -D warnings"
+
+# Quick cargo check with pyo3 enabled (useful for CI or manual pre-checks):
+check-pyo3 = "check --features pyo3"
+
+# Run tests (no-run) with pyo3 enabled. Useful to verify compilation of test targets
+# that depend on pyo3 without executing them.
+test-pyo3 = "test --no-run --features pyo3"

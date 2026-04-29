@@ -1,0 +1,59 @@
+[package]
+name = "bayesfm"
+version = "0.0.0"
+authors = ["Andreas J. Weiss <ajefweiss@gmail.com>"]
+edition = "2024"
+license = "MIT License"
+repository = "https://github.com/ajefweiss/ocnus/"
+rust-version = "1.92"
+
+[dependencies]
+approx = "*"
+chrono = "*"
+criterion = "*"
+derive_builder = "*"
+derive_more = { version = "*", features = ["full"] }
+dtw = "*"
+env_logger = "*"
+itertools = "*"
+log = "*"
+nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
+num-traits = "*"
+numpy = { version = "0.28.0", features = ["nalgebra"], optional = true }
+paste = { version = "*", optional = true }
+pyo3 = { version = "0.28.3", features = ["multiple-pymethods", "extension-module"], optional = true }
+rand = "*"
+rand_distr = "*"
+rand_xoshiro = "*"
+rayon = "*"
+serde = { version = "*", features = ["derive"] }
+serde_arrays = "*"
+serde_json5 = "*"
+typenum = "*"
+thiserror = "*"
+wcs = "*"
+
+prodef = { path = "/Users/ajweiss/Projects/prodef-rs" }
+
+[features]
+pyo3 = ["dep:numpy", "dep:paste", "dep:pyo3"]
+pyo3_f32 = ["pyo3"]
+
+[profile.bench]
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+
+[profile.test]
+opt-level = 1
+
+[lints.rust]
+missing_docs = "deny"
+
+[lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"

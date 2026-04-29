@@ -1,0 +1,12 @@
+{
+    // Enable the `pyo3` feature for rust-analyzer's cargo operations (check, clippy).
+    // This causes the IDE to type-check with pyo3 enabled while leaving default
+    // cargo test/build invocations unchanged.
+    "rust-analyzer.cargo.features": [
+        "pyo3"
+    ],
+    // Use the cargo alias `lint` for the default 'Run Clippy' task if present.
+    "rust-analyzer.checkOnSave.command": "clippy",
+    // Optionally set checkOnSave to run — this will use the features above.
+    "rust-analyzer.checkOnSave.enable": true
+}
