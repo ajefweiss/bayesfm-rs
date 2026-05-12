@@ -4,7 +4,6 @@ use crate::{
 };
 use log::debug;
 use nalgebra::{Const, RealField, SVectorView, Scalar, U1};
-use num_traits::AsPrimitive;
 use rand::{RngExt, SeedableRng};
 use rand_distr::{Distribution, StandardNormal};
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -22,8 +21,8 @@ where
     OC: Scalar + Sync,
     for<'a> &'a OC: Sub<&'a OC, Output = T>,
     OD: AddAssign + Obs,
-    M::FMST: std::fmt::Debug + Clone + Default + Send + Sync,
-    M::CSST: std::fmt::Debug + Clone + Default + Send + Sync,
+    M::FMST: Clone + std::fmt::Debug + Default + Send + Sync,
+    M::CSST: Clone + std::fmt::Debug + Default + Send + Sync,
     StandardNormal: Distribution<T>,
 {
     /// A single iteration of an differential evolution algorithm (not a particle filter!).
@@ -37,7 +36,6 @@ where
         (mutation, recombination): (T, T),
     ) -> Result<usize, ModelError<T>>
     where
-        T: AsPrimitive<f64>,
         EF: Fn(&[OD], &[OD]) -> T + Sync,
         OF: Fn(&M, &OC, &SVectorView<T, D>, &M::FMST, &M::CSST) -> Result<OD, ModelError<T>> + Sync,
     {
@@ -76,9 +74,9 @@ where
             .chunks(128)
             .for_each(|mut chunk| {
                 chunk.iter_mut().for_each(|(idx, new_col)| {
-                    new_col[(ddx, 0)] += mutation
-                        * (self.ensbl.params().column(ddx_a[*idx])[ddx]
-                            - self.ensbl.params().column(ddx_b[*idx])[ddx]);
+                    new_col[(ddx, 0)] += mutation.clone()
+                        * (self.ensbl.params().column(ddx_a[*idx])[ddx].clone()
+                            - self.ensbl.params().column(ddx_b[*idx])[ddx].clone());
 
                     let view = (*new_col).as_view::<Const<D>, U1, U1, Const<D>>();
 
@@ -92,7 +90,7 @@ where
 
         self.model.initialize_states_ensbl(&mut temp_ensbl)?;
 
-        self.model.simulate_ensbl(
+        self.model.simulate_ensbl_par(
             &mut temp_ensbl,
             &mut temp_obs_ensbl,
             obs_func,
@@ -124,7 +122,7 @@ where
                             if ((value < **error) && (**threshold < recombination))
                                 && self.model.prior_domain().contains(temp_pt)
                             {
-                                pt[(ddx, 0)] = temp_pt[(ddx, 0)];
+                                pt[(ddx, 0)] = temp_pt[(ddx, 0)].clone();
                                 **error = value;
                                 out.set_column(0, temp_out);
                                 1
@@ -138,16 +136,13 @@ where
             .sum::<usize>();
 
         // Compute quantiles for logging purposes.
-        let quantiles = quantiles(
-            &self.errors,
-            &[
-                T::from_f64(0.34).unwrap(),
-                T::from_f64(0.50).unwrap(),
-                T::from_f64(0.68).unwrap(),
-            ],
-        );
+        let quantiles = quantiles(&self.errors, &[0.1587, 0.5, 0.8413]);
 
-        let (q_low, q_mid, q_hgh) = (quantiles[0], quantiles[1], quantiles[2]);
+        let (q_low, q_mid, q_hgh) = (
+            quantiles[0].clone(),
+            quantiles[1].clone(),
+            quantiles[2].clone(),
+        );
 
         debug!(
             "dev_iter\n\teps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\tmutated = {:.1} / {}",
@@ -175,14 +170,17 @@ where
         (mutation, recombination): (T, T),
     ) -> Result<Vec<usize>, ModelError<T>>
     where
-        T: AsPrimitive<f64> + AsPrimitive<usize>,
         EF: Fn(&[OD], &[OD]) -> T + Sync,
         OF: Fn(&M, &OC, &SVectorView<T, D>, &M::FMST, &M::CSST) -> Result<OD, ModelError<T>> + Sync,
     {
         let mut mutated = Vec::new();
 
         for _ in 0..self.settings.max_iterations * P {
-            let result = self.dev(err_func, obs_func, (mutation, recombination));
+            let result = self.dev(
+                err_func,
+                obs_func,
+                (mutation.clone(), recombination.clone()),
+            );
 
             match result {
                 Ok(new_mutated) => {

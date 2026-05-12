@@ -1,6 +1,6 @@
 use crate::{
     noise::ObsVecNoise,
-    pytypes::{Float, util::array_to_matrix},
+    pytypes::{Float, array_to_matrix},
 };
 use nalgebra::Dyn;
 use numpy::{PyReadonlyArray2, ndarray::Dim};
@@ -36,7 +36,7 @@ impl PyObsVecNoise {
         covariance: PyReadonlyArray2<Float>,
         seed: u64,
     ) -> PyResult<Self> {
-        let matrix = array_to_matrix::<Dim<[usize; 2]>, Dyn, Dyn, Dyn, Dyn>(covariance)?;
+        let matrix = array_to_matrix::<Dim<[usize; 2]>, Dyn, Dyn>(covariance, "covariance")?;
         let length = matrix.nrows();
 
         let mvnpdf =

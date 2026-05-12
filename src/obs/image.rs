@@ -16,7 +16,7 @@ use std::{
 #[serde(bound(deserialize = "T: Deserialize<'de>"))]
 pub struct ObsImg<T>(#[into_iterator(owned, ref, ref_mut)] pub DMatrix<T>)
 where
-    T: Clone + Scalar;
+    T: Scalar;
 
 impl<T> Add for ObsImg<T>
 where

@@ -8,7 +8,6 @@ use crate::{
 use itertools::Itertools;
 use log::debug;
 use nalgebra::{Const, DVector, Dyn, OMatrix, RealField, SVector, SVectorView, Scalar, U1};
-use num_traits::AsPrimitive;
 use prodef::{Density, Domain, MultivariateNormalDensity, ParticleDensity};
 use rand::{RngExt, SeedableRng};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
@@ -19,14 +18,13 @@ use std::{cmp::Ordering, iter::Sum, ops::Sub, time::Instant};
 impl<T, OC, M, const D: usize, const P: usize, const N: usize>
     ParticleFilter<T, OC, ObsVec<T, N>, M, D, P>
 where
-    T: Copy + RealField + SampleUniform + Sum,
+    T: RealField + SampleUniform + Sum,
     OC: Scalar + Sync,
     for<'a> &'a OC: Sub<&'a OC, Output = T>,
     M: Clone + EnsembleModel<T, D, P> + Sync,
-    M::FMST: std::fmt::Debug + Clone + Default + Send,
-    M::CSST: std::fmt::Debug + Clone + Default + Send,
+    M::FMST: Clone + std::fmt::Debug + Default + Send,
+    M::CSST: Clone + std::fmt::Debug + Default + Send,
     StandardNormal: Distribution<T>,
-    usize: AsPrimitive<T>,
 {
     /// A single iteration of an sequential importance resampling particle filter algorithm.
     pub fn sir_mvnk<LF, OF>(
@@ -81,7 +79,7 @@ where
             self.ensbl.opt_weights().map(|value| &**value),
         )
         .unwrap()
-            * self.settings.exploration_factor;
+            * self.settings.exploration_factor.clone();
 
         mvnk.mean = SVector::zeros();
 
@@ -110,7 +108,7 @@ where
         )?;
 
         // Offset log-likelihood values to reduce precision issues.
-        let llh_max = *interim_likelihood_values
+        let llh_max = interim_likelihood_values
             .iter()
             .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Less))
             .unwrap();
@@ -123,15 +121,19 @@ where
                 .zip(sub_pf.ensbl.params().par_column_iter())
                 .zip(transitions.par_iter())
                 .map(|((llh, params), transition)| {
-                    (*llh - llh_max).exp()
+                    (llh.clone() - llh_max.clone()).exp()
                         * self.model.prior_density(&params).unwrap()
-                        * *transition
+                        * transition.clone()
                 })
                 .collect::<Vec<T>>(),
         );
 
         // Compute the effective sample size from the interim weights
-        let ess = T::one() / interim_weights.iter().map(|value| value.powi(2)).sum::<T>();
+        let ess = T::one()
+            / interim_weights
+                .iter()
+                .map(|value| value.clone().powi(2))
+                .sum::<T>();
 
         // Update interim weights.
         sub_pf.ensbl.set_opt_weights(Some(interim_weights));
@@ -178,11 +180,11 @@ where
             .iter()
             .sorted_by(|a, b| a.partial_cmp(b).unwrap())
             .dedup()
-            .copied()
+            .cloned()
             .collect::<Vec<T>>()
             .len();
 
-        self.model.simulate_ensbl(
+        self.model.simulate_ensbl_par(
             &mut self.ensbl,
             &mut self.obs_ensbl,
             obs_func,

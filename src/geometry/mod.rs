@@ -22,7 +22,7 @@ pub use util::*;
 
 use crate::tval;
 use nalgebra::{
-    Const, DMatrix, Dim, RealField, SMatrix, SVector, SVectorView, Vector3, VectorView,
+    Const, DMatrix, Dim, RealField, SMatrix, SVector, SVectorView, U1, U3, Vector3, VectorView,
 };
 use rayon::prelude::*;
 use std::iter::Sum;
@@ -42,6 +42,15 @@ use std::iter::Sum;
 /// - Basis vectors (contravariant and covariant representations)
 /// - Metric tensor determinant (`sqrt_detg`)
 /// - Coordinate transformations between internal coordinates (`internal_coordinates`) and external Cartesian (`external_coordinates`)
+///
+/// # Strides
+/// To allow for arbitrary memory layouts many functions take up to four stride generics.
+/// - `CRStride`: Stride for the internal coordinates (row)
+/// - `CCStride`: Stride for the internal coordinates (column)
+/// - `PRStride`: Stride for the parameters (row)
+/// - `PCStride`: Stride for the parameters (column)
+///
+/// In many usecases the rust can infer these types, but they can also be explicitly specified when needed.
 ///
 /// # Examples
 /// - `CartesianGeometry`: (x, y, z) with identity basis
@@ -64,20 +73,34 @@ where
     type CSST: Clone + Default + Send;
 
     /// Returns the local contravariant basis vectors.
-    fn contravariant_basis<RStride: Dim, CStride: Dim>(
-        internal_coordinates: &SVectorView<T, D>,
-        params: &VectorView<T, Const<P>, RStride, CStride>,
+    fn contravariant_basis<CRStride, CCStride, PRStride, PCStride>(
+        internal_coordinates: &VectorView<T, Const<D>, CRStride, CCStride>,
+        params: &VectorView<T, Const<P>, PRStride, PCStride>,
         cs_state: &Self::CSST,
-    ) -> Option<SMatrix<T, D, D>>;
+    ) -> Option<SMatrix<T, D, D>>
+    where
+        CRStride: Dim,
+        CCStride: Dim,
+        PRStride: Dim,
+        PCStride: Dim;
 
     /// Returns the local contravariant basis vectors and returns the normalized vectors.
-    fn contravariant_basis_normalized<RStride: Dim, CStride: Dim>(
-        internal_coordinates: &SVectorView<T, D>,
-        params: &VectorView<T, Const<P>, RStride, CStride>,
+    fn contravariant_basis_normalized<CRStride, CCStride, PRStride, PCStride>(
+        internal_coordinates: &VectorView<T, Const<D>, CRStride, CCStride>,
+        params: &VectorView<T, Const<P>, PRStride, PCStride>,
         cs_state: &Self::CSST,
-    ) -> Option<SMatrix<T, D, D>> {
-        let mut basis =
-            Self::contravariant_basis::<RStride, CStride>(internal_coordinates, params, cs_state)?;
+    ) -> Option<SMatrix<T, D, D>>
+    where
+        CRStride: Dim,
+        CCStride: Dim,
+        PRStride: Dim,
+        PCStride: Dim,
+    {
+        let mut basis = Self::contravariant_basis::<CRStride, CCStride, PRStride, PCStride>(
+            internal_coordinates,
+            params,
+            cs_state,
+        )?;
 
         basis.column_iter_mut().for_each(|mut col| {
             col.set_column(0, &col.normalize());
@@ -87,17 +110,24 @@ where
     }
 
     /// Create a vector from contravariant components.
-    fn contravariant_vector<RStride: Dim, CStride: Dim>(
-        internal_coordinates: &SVectorView<T, D>,
+    fn contravariant_vector<CRStride, CCStride, PRStride, PCStride>(
+        internal_coordinates: &VectorView<T, Const<D>, CRStride, CCStride>,
         components: &SVectorView<T, D>,
-        params: &VectorView<T, Const<P>, RStride, CStride>,
+        params: &VectorView<T, Const<P>, PRStride, PCStride>,
         cs_state: &Self::CSST,
     ) -> Option<SVector<T, D>>
     where
+        CRStride: Dim,
+        CCStride: Dim,
+        PRStride: Dim,
+        PCStride: Dim,
         SVector<T, D>: Sum,
     {
-        let basis =
-            Self::contravariant_basis::<RStride, CStride>(internal_coordinates, params, cs_state)?;
+        let basis = Self::contravariant_basis::<CRStride, CCStride, PRStride, PCStride>(
+            internal_coordinates,
+            params,
+            cs_state,
+        )?;
 
         Some(
             basis
@@ -109,16 +139,20 @@ where
     }
 
     /// Create a vector from contravariant components, using the normalized basis vectors.
-    fn contravariant_vector_normalized<RStride: Dim, CStride: Dim>(
-        internal_coordinates: &SVectorView<T, D>,
+    fn contravariant_vector_normalized<CRStride, CCStride, PRStride, PCStride>(
+        internal_coordinates: &VectorView<T, Const<D>, CRStride, CCStride>,
         components: &SVectorView<T, D>,
-        params: &VectorView<T, Const<P>, RStride, CStride>,
+        params: &VectorView<T, Const<P>, PRStride, PCStride>,
         cs_state: &Self::CSST,
     ) -> Option<SVector<T, D>>
     where
+        CRStride: Dim,
+        CCStride: Dim,
+        PRStride: Dim,
+        PCStride: Dim,
         SVector<T, D>: Sum,
     {
-        let basis = Self::contravariant_basis_normalized::<RStride, CStride>(
+        let basis = Self::contravariant_basis_normalized::<CRStride, CCStride, PRStride, PCStride>(
             internal_coordinates,
             params,
             cs_state,
@@ -134,28 +168,39 @@ where
     }
 
     /// Returns the local covariant basis vectors.
-    fn covariant_basis<RStride: Dim, CStride: Dim>(
-        _internal_coordinates: &SVectorView<T, D>,
-        _params: &VectorView<T, Const<P>, RStride, CStride>,
+    fn covariant_basis<CRStride, CCStride, PRStride, PCStride>(
+        _internal_coordinates: &VectorView<T, Const<D>, CRStride, CCStride>,
+        _params: &VectorView<T, Const<P>, PRStride, PCStride>,
         _state: &Self::CSST,
-    ) -> Option<SMatrix<T, D, D>> {
+    ) -> Option<SMatrix<T, D, D>>
+    where
+        CRStride: Dim,
+        CCStride: Dim,
+        PRStride: Dim,
+        PCStride: Dim,
+    {
         unimplemented!("covariant basis vectors are currently not implemented")
     }
 
     /// Initialize the coordinate system state type.
     ///
     /// This function may panic for invalid parameters.
-    fn initialize_csst<RStride: Dim, CStride: Dim>(
-        params: &VectorView<T, Const<P>, RStride, CStride>,
+    fn initialize_csst<PRStride: Dim, PCStride: Dim>(
+        params: &VectorView<T, Const<P>, PRStride, PCStride>,
         cs_state: &mut Self::CSST,
     );
 
     /// Returns the square root of the determinant of the metric tensor.
-    fn sqrt_detg<RStride: Dim, CStride: Dim>(
-        internal_coordinates: &SVectorView<T, D>,
-        params: &VectorView<T, Const<P>, RStride, CStride>,
+    fn sqrt_detg<CRStride, CCStride, PRStride, PCStride>(
+        internal_coordinates: &VectorView<T, Const<D>, CRStride, CCStride>,
+        params: &VectorView<T, Const<P>, PRStride, PCStride>,
         cs_state: &Self::CSST,
-    ) -> Option<T>;
+    ) -> Option<T>
+    where
+        CRStride: Dim,
+        CCStride: Dim,
+        PRStride: Dim,
+        PCStride: Dim;
 
     /// Transform internal coords `internal_coordinates` into cartesian coords `external_coordinates`.
     ///
@@ -168,11 +213,16 @@ where
     ///
     /// # Returns
     /// Internal coordinates for this geometry, or `None` if transformation fails
-    fn transform_external_to_internal<RStride: Dim, CStride: Dim>(
-        external_coordinates: &SVectorView<T, D>,
-        params: &VectorView<T, Const<P>, RStride, CStride>,
+    fn transform_external_to_internal<CRStride, CCStride, PRStride, PCStride>(
+        external_coordinates: &VectorView<T, Const<D>, CRStride, CCStride>,
+        params: &VectorView<T, Const<P>, PRStride, PCStride>,
         cs_state: &Self::CSST,
-    ) -> Option<SVector<T, D>>;
+    ) -> Option<SVector<T, D>>
+    where
+        CRStride: Dim,
+        CCStride: Dim,
+        PRStride: Dim,
+        PCStride: Dim;
 
     /// Transform external coords `external_coordinates` into the internal coords `internal_coordinates`.
     ///
@@ -185,11 +235,16 @@ where
     ///
     /// # Returns
     /// External Cartesian coordinates, or `None` if transformation fails
-    fn transform_internal_to_external<RStride: Dim, CStride: Dim>(
-        internal_coordinates: &SVectorView<T, D>,
-        params: &VectorView<T, Const<P>, RStride, CStride>,
+    fn transform_internal_to_external<CRStride, CCStride, PRStride, PCStride>(
+        internal_coordinates: &VectorView<T, Const<D>, CRStride, CCStride>,
+        params: &VectorView<T, Const<P>, PRStride, PCStride>,
         cs_state: &Self::CSST,
-    ) -> Option<SVector<T, D>>;
+    ) -> Option<SVector<T, D>>
+    where
+        CRStride: Dim,
+        CCStride: Dim,
+        PRStride: Dim,
+        PCStride: Dim;
 }
 
 /// A trait that is shared by all 3-dimensional coordinate systems describing a model geometry.
@@ -217,7 +272,7 @@ where
                     .iter()
                     .flat_map(|(row_nu, row_s)| {
                         row_nu.iter().zip(row_s.iter()).map(|(nu, s)| {
-                            Self::transform_internal_to_external(
+                            Self::transform_internal_to_external::<U1, U3, RStride, CStride>(
                                 &Vector3::from([mu.clone(), nu.clone(), s.clone()]).as_view(),
                                 params,
                                 cs_state,
@@ -268,54 +323,60 @@ where
         let internal_coordinates_3m = internal_coordinates
             - Vector3::<T>::z_axis().into_inner() * delta_h.clone() / tval!(2, usize);
 
-        let basis = Self::contravariant_basis(
+        let basis = Self::contravariant_basis::<U1, U3, _, _>(
             &internal_coordinates.as_view(),
             &params.rows_generic(0, params.shape_generic().0),
             &cs_state,
         )
         .unwrap();
 
-        let external_coordinates_1p = Self::transform_internal_to_external(
-            &internal_coordinates_1p.as_view(),
-            &params.rows_generic(0, params.shape_generic().0),
-            &cs_state,
-        )
-        .unwrap();
+        let external_coordinates_1p =
+            Self::transform_internal_to_external::<U1, U3, RStride, CStride>(
+                &internal_coordinates_1p.as_view(),
+                &params.rows_generic(0, params.shape_generic().0),
+                &cs_state,
+            )
+            .unwrap();
 
-        let external_coordinates_1m = Self::transform_internal_to_external(
-            &internal_coordinates_1m.as_view(),
-            &params.rows_generic(0, params.shape_generic().0),
-            &cs_state,
-        )
-        .unwrap();
+        let external_coordinates_1m =
+            Self::transform_internal_to_external::<U1, U3, RStride, CStride>(
+                &internal_coordinates_1m.as_view(),
+                &params.rows_generic(0, params.shape_generic().0),
+                &cs_state,
+            )
+            .unwrap();
 
-        let external_coordinates_2p = Self::transform_internal_to_external(
-            &internal_coordinates_2p.as_view(),
-            &params.rows_generic(0, params.shape_generic().0),
-            &cs_state,
-        )
-        .unwrap();
+        let external_coordinates_2p =
+            Self::transform_internal_to_external::<U1, U3, RStride, CStride>(
+                &internal_coordinates_2p.as_view(),
+                &params.rows_generic(0, params.shape_generic().0),
+                &cs_state,
+            )
+            .unwrap();
 
-        let external_coordinates_2m = Self::transform_internal_to_external(
-            &internal_coordinates_2m.as_view(),
-            &params.rows_generic(0, params.shape_generic().0),
-            &cs_state,
-        )
-        .unwrap();
+        let external_coordinates_2m =
+            Self::transform_internal_to_external::<U1, U3, RStride, CStride>(
+                &internal_coordinates_2m.as_view(),
+                &params.rows_generic(0, params.shape_generic().0),
+                &cs_state,
+            )
+            .unwrap();
 
-        let external_coordinates_3p = Self::transform_internal_to_external(
-            &internal_coordinates_3p.as_view(),
-            &params.rows_generic(0, params.shape_generic().0),
-            &cs_state,
-        )
-        .unwrap();
+        let external_coordinates_3p =
+            Self::transform_internal_to_external::<U1, U3, RStride, CStride>(
+                &internal_coordinates_3p.as_view(),
+                &params.rows_generic(0, params.shape_generic().0),
+                &cs_state,
+            )
+            .unwrap();
 
-        let external_coordinates_3m = Self::transform_internal_to_external(
-            &internal_coordinates_3m.as_view(),
-            &params.rows_generic(0, params.shape_generic().0),
-            &cs_state,
-        )
-        .unwrap();
+        let external_coordinates_3m =
+            Self::transform_internal_to_external::<U1, U3, RStride, CStride>(
+                &internal_coordinates_3m.as_view(),
+                &params.rows_generic(0, params.shape_generic().0),
+                &cs_state,
+            )
+            .unwrap();
 
         assert!(ulps_eq!(
             basis.column(0),
@@ -331,7 +392,7 @@ where
         ));
         assert!(ulps_eq!(
             basis.column(2),
-            &((external_coordinates_3p - external_coordinates_3m) / delta_h.clone()).as_view(),
+            &((external_coordinates_3p - external_coordinates_3m) / delta_h).as_view(),
             max_ulps = 5,
             epsilon = tval!(1e-5, f64)
         ));
@@ -341,7 +402,7 @@ where
             .cross(&basis.column(1))
             .dot(&basis.column(2)))
         .abs();
-        let sqrtdetg_analy = Self::sqrt_detg(
+        let sqrtdetg_analy = Self::sqrt_detg::<U1, U3, _, _>(
             &internal_coordinates.as_view(),
             &params.rows_generic(0, params.shape_generic().0),
             &cs_state,

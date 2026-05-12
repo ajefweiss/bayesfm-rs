@@ -38,7 +38,7 @@ macro_rules! model_impl_coords {
                 { $($coords)::+::<f64>::NPARAMS + $params.len() },
             > for $model<T, G>
         where
-            T: nalgebra::RealField,
+            T:  nalgebra::RealField,
         {
             const PARAM_NAMES: nalgebra::SVector<
                 &'static str,
@@ -54,16 +54,18 @@ macro_rules! model_impl_coords {
                 { $($coords)::+::<f64>::NPARAMS },
             >>::CSST;
 
-            fn contravariant_basis<RStride: nalgebra::Dim, CStride: nalgebra::Dim>(
-                internal_coordinates: &nalgebra::SVectorView<
+            fn contravariant_basis<CRStride, CCStride, PRStride, PCStride>(
+                internal_coordinates: &nalgebra::VectorView<
                     T,
-                    { $($coords)::+::<f64>::NDIMS },
+                    nalgebra::Const<{ $($coords)::+::<f64>::NDIMS }>,
+                    CRStride,
+                    CCStride
                 >,
                 params: &nalgebra::VectorView<
                     T,
                     nalgebra::Const<{ $($coords)::+::<f64>::NPARAMS + $params.len() }>,
-                    RStride,
-                    CStride,
+                    PRStride,
+                    PCStride,
                 >,
                 cs_state: &Self::CSST,
             ) -> Option<
@@ -72,7 +74,13 @@ macro_rules! model_impl_coords {
                     { $($coords)::+::<f64>::NDIMS },
                     { $($coords)::+::<f64>::NDIMS },
                 >,
-            > {
+            >
+            where
+                CRStride: nalgebra::Dim,
+                CCStride: nalgebra::Dim,
+                PRStride: nalgebra::Dim,
+                PCStride: nalgebra::Dim,
+            {
                 $($coords)::+::<T>::contravariant_basis(
                     internal_coordinates,
                     &params.fixed_rows::<{ $($coords)::+::<f64>::NPARAMS }>(0),
@@ -80,19 +88,27 @@ macro_rules! model_impl_coords {
                 )
             }
 
-            fn sqrt_detg<RStride: nalgebra::Dim, CStride: nalgebra::Dim>(
-                internal_coordinates: &nalgebra::SVectorView<
+            fn sqrt_detg<CRStride, CCStride, PRStride, PCStride>(
+                internal_coordinates: &nalgebra::VectorView<
                     T,
-                    { $($coords)::+::<f64>::NDIMS },
+                    nalgebra::Const<{ $($coords)::+::<f64>::NDIMS }>,
+                    CRStride,
+                    CCStride
                 >,
                 params: &nalgebra::VectorView<
                     T,
                     nalgebra::Const<{ $($coords)::+::<f64>::NPARAMS + $params.len() }>,
-                    RStride,
-                    CStride,
+                    PRStride,
+                    PCStride,
                 >,
                 cs_state: &Self::CSST,
-            ) -> Option<T> {
+            ) -> Option<T>
+            where
+                CRStride: nalgebra::Dim,
+                CCStride: nalgebra::Dim,
+                PRStride: nalgebra::Dim,
+                PCStride: nalgebra::Dim,
+            {
                 $($coords)::+::<T>::sqrt_detg(
                     internal_coordinates,
                     &params.fixed_rows::<{ $($coords)::+::<f64>::NPARAMS }>(0),
@@ -100,12 +116,12 @@ macro_rules! model_impl_coords {
                 )
             }
 
-            fn initialize_csst<RStride: nalgebra::Dim, CStride: nalgebra::Dim>(
+            fn initialize_csst<PRStride: nalgebra::Dim, PCStride: nalgebra::Dim>(
                 params: &nalgebra::VectorView<
                     T,
                     nalgebra::Const<{ $($coords)::+::<f64>::NPARAMS + $params.len() }>,
-                    RStride,
-                    CStride,
+                    PRStride,
+                    PCStride,
                 >,
                 cs_state: &mut Self::CSST,
             ) {
@@ -115,41 +131,57 @@ macro_rules! model_impl_coords {
                 )
             }
 
-            fn transform_internal_to_external<RStride: nalgebra::Dim, CStride: nalgebra::Dim>(
-                internal_coordinates: &nalgebra::SVectorView<
+            fn transform_external_to_internal<CRStride, CCStride, PRStride, PCStride>(
+                external_coordinates: &nalgebra::VectorView<
                     T,
-                    { $($coords)::+::<f64>::NDIMS },
+                    nalgebra::Const<{ $($coords)::+::<f64>::NDIMS }>,
+                    CRStride,
+                    CCStride
                 >,
                 params: &nalgebra::VectorView<
                     T,
                     nalgebra::Const<{ $($coords)::+::<f64>::NPARAMS + $params.len() }>,
-                    RStride,
-                    CStride,
+                    PRStride,
+                    PCStride,
                 >,
                 cs_state: &Self::CSST,
-            ) -> Option<nalgebra::SVector<T, { $($coords)::+::<f64>::NDIMS }>> {
-                $($coords)::+::<T>::transform_internal_to_external::<RStride, CStride>(
-                    internal_coordinates,
+            ) -> Option<nalgebra::SVector<T, { $($coords)::+::<f64>::NDIMS }>>
+            where
+                CRStride: nalgebra::Dim,
+                CCStride: nalgebra::Dim,
+                PRStride: nalgebra::Dim,
+                PCStride: nalgebra::Dim,
+            {
+                $($coords)::+::<T>::transform_external_to_internal::<CRStride, CCStride, PRStride, PCStride>(
+                    external_coordinates,
                     &params.fixed_rows::<{ $($coords)::+::<f64>::NPARAMS }>(0),
                     cs_state,
                 )
             }
 
-            fn transform_external_to_internal<RStride: nalgebra::Dim, CStride: nalgebra::Dim>(
-                external_coordinates: &nalgebra::SVectorView<
+            fn transform_internal_to_external<CRStride, CCStride, PRStride, PCStride>(
+                internal_coordinates: &nalgebra::VectorView<
                     T,
-                    { $($coords)::+::<f64>::NDIMS },
+                    nalgebra::Const<{ $($coords)::+::<f64>::NDIMS }>,
+                    CRStride,
+                    CCStride
                 >,
                 params: &nalgebra::VectorView<
                     T,
                     nalgebra::Const<{ $($coords)::+::<f64>::NPARAMS + $params.len() }>,
-                    RStride,
-                    CStride,
+                    PRStride,
+                    PCStride,
                 >,
                 cs_state: &Self::CSST,
-            ) -> Option<nalgebra::SVector<T, { $($coords)::+::<f64>::NDIMS }>> {
-                $($coords)::+::<T>::transform_external_to_internal::<RStride, CStride>(
-                    external_coordinates,
+            ) -> Option<nalgebra::SVector<T, { $($coords)::+::<f64>::NDIMS }>>
+            where
+                CRStride: nalgebra::Dim,
+                CCStride: nalgebra::Dim,
+                PRStride: nalgebra::Dim,
+                PCStride: nalgebra::Dim,
+            {
+                $($coords)::+::<T>::transform_internal_to_external::<CRStride, CCStride, PRStride, PCStride>(
+                    internal_coordinates,
                     &params.fixed_rows::<{ $($coords)::+::<f64>::NPARAMS }>(0),
                     cs_state,
                 )

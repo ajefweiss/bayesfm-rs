@@ -31,7 +31,7 @@ where
 {
     let value = param_index(name, names).map(|index| params[index].clone());
 
-    value.unwrap_or_else(|| default.clone())
+    value.unwrap_or(default)
 }
 
 /// Generate unit quaternion from three successive rotations around the z, y and x-axis.
@@ -50,12 +50,14 @@ where
         -y_angle,
     );
 
+    let combined = rot_y * rot_z;
+
     let rot_x = UnitQuaternion::from_axis_angle(
-        &Unit::new_unchecked((rot_y.clone() * rot_z.clone()).transform_vector(&ux)),
+        &Unit::new_unchecked(combined.transform_vector(&ux)),
         x_angle,
     );
 
-    rot_x * (rot_y * rot_z)
+    rot_x * combined
 }
 
 #[cfg(test)]

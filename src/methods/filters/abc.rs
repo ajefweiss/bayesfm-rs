@@ -8,7 +8,6 @@ use crate::{
 };
 use log::debug;
 use nalgebra::{Const, RealField, SVector, SVectorView, Scalar, U1};
-use num_traits::AsPrimitive;
 use prodef::{Domain, MultivariateNormalDensity, ParticleDensity};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
@@ -18,13 +17,12 @@ impl<T, OC, M, const D: usize, const P: usize, const N: usize>
     ParticleFilter<T, OC, ObsVec<T, N>, M, D, P>
 where
     M: EnsembleModel<T, D, P> + Sync,
-    T: AsPrimitive<f64> + Copy + RealField + SampleUniform + Sum,
+    T: RealField + SampleUniform + Sum,
     OC: Scalar + Sync,
     for<'a> &'a OC: Sub<&'a OC, Output = T>,
-    M::FMST: std::fmt::Debug + Clone + Default + Send,
-    M::CSST: std::fmt::Debug + Clone + Default + Send,
+    M::FMST: Clone + std::fmt::Debug + Default + Send,
+    M::CSST: Clone + std::fmt::Debug + Default + Send,
     StandardNormal: Distribution<T>,
-    usize: AsPrimitive<T>,
 {
     /// A single iteration of an approximate Bayesian Computation particle filter algorithm using a multinormal kernel.
     pub fn abc_mvnk<EF, OF, NM>(
@@ -66,7 +64,7 @@ where
             self.ensbl.opt_weights().map(|value| &**value),
         )
         .unwrap()
-            * self.settings.exploration_factor;
+            * self.settings.exploration_factor.clone();
 
         mvnk.mean = SVector::zeros();
 
@@ -97,17 +95,23 @@ where
                 .par_column_iter()
                 .zip(transitions.par_iter())
                 .map(|(params, transition)| {
-                    self.model.prior_density(&params).unwrap() * *transition
+                    self.model.prior_density(&params).unwrap() * transition.clone()
                 })
                 .collect::<Vec<T>>(),
         );
 
         // Compute the effective sample size.
-        let ess = T::one() / new_weights.iter().map(|value| value.powi(2)).sum::<T>();
+        let ess = T::one()
+            / new_weights
+                .iter()
+                .map(|value| value.clone().powi(2))
+                .sum::<T>();
 
         self.ensbl.set_opt_weights(Some(new_weights));
 
-        if ess < tval!(self.ensbl.len(), usize) * self.settings.effective_particle_threshold_factor
+        if ess
+            < tval!(self.ensbl.len(), usize)
+                * self.settings.effective_particle_threshold_factor.clone()
         {
             // Replace underlying particle density with previous particle density.
             self.ensbl.set_params(&old_params.as_view());
@@ -117,12 +121,13 @@ where
         }
 
         // Compute quantiles for logging purposes.
-        let quantiles = quantiles(
-            &filter_values,
-            &[tval!(0.34, f64), tval!(0.50, f64), tval!(0.68, f64)],
-        );
+        let quantiles = quantiles(&filter_values, &[0.1587, 0.5, 0.8413]);
 
-        let (q_low, q_mid, q_hgh) = (quantiles[0], quantiles[1], quantiles[2]);
+        let (q_low, q_mid, q_hgh) = (
+            quantiles[0].clone(),
+            quantiles[1].clone(),
+            quantiles[2].clone(),
+        );
 
         debug!(
             "abc_iter\n\teps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec\n\teffective sample size = {:.1} / {}",
@@ -144,7 +149,7 @@ where
 
         self.model.initialize_states_ensbl(&mut self.ensbl)?;
 
-        self.model.simulate_ensbl(
+        self.model.simulate_ensbl_par(
             &mut self.ensbl,
             &mut self.obs_ensbl,
             obs_func,
@@ -165,11 +170,10 @@ where
         &mut self,
         err_func: &EF,
         obs_func: &OF,
-        error_quantile: T,
+        error_quantile: f64,
         noise: &mut NM,
     ) -> Result<(Vec<T>, Vec<T>), FilterError<T>>
     where
-        T: AsPrimitive<usize>,
         NM: Noise<ObsVec<T, N>>,
         EF: Fn(&[ObsVec<T, N>], &[ObsVec<T, N>]) -> T + Sync,
         OF: Fn(
@@ -192,7 +196,7 @@ where
         for _ in 0..self.settings.max_iterations {
             let threshold = self.error_quantile(error_quantile).unwrap();
 
-            let result = self.abc_mvnk((err_func, threshold), obs_func, noise);
+            let result = self.abc_mvnk((err_func, threshold.clone()), obs_func, noise);
 
             match result {
                 Ok(new_ess) => {

@@ -1,5 +1,5 @@
 use derive_more::From;
-use nalgebra::{Matrix, RealField, SMatrix, SVector, SVectorView};
+use nalgebra::{Matrix, RealField, SMatrix, SVector, SVectorView, Scalar};
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, ops::Add};
@@ -30,7 +30,7 @@ use std::{fmt::Debug, ops::Add};
 #[serde(bound(deserialize = "T: Deserialize<'de>"))]
 pub struct ObsCoordBasis<T, const D: usize>
 where
-    T: RealField,
+    T: Scalar,
 {
     /// Internal coordinate values in the curvilinear system.
     coordinates: SVector<T, D>,
@@ -40,7 +40,7 @@ where
 
 impl<T, const D: usize> ObsCoordBasis<T, D>
 where
-    T: RealField,
+    T:  RealField,
 {
     /// Returns the basis vector matrix (D × D, column-major).
     ///
@@ -89,7 +89,7 @@ where
 
 impl<T> ObsCoordBasis<T, 1>
 where
-    T: RealField,
+    T:  RealField,
 {
     /// Returns the first (and only) basis vector (column 0).
     ///
@@ -102,7 +102,7 @@ where
 
 impl<T> ObsCoordBasis<T, 2>
 where
-    T: RealField,
+    T:  RealField,
 {
     /// Returns the first basis vector (column 0).
     ///
@@ -115,7 +115,7 @@ where
 
 impl<T> ObsCoordBasis<T, 3>
 where
-    T: RealField,
+    T:  RealField,
 {
     /// Returns the first basis vector (column 0).
     ///
@@ -193,7 +193,7 @@ where
 
 impl<T, const D: usize> Add for ObsCoordBasis<T, D>
 where
-    T: RealField,
+    T:  RealField,
 {
     type Output = Self;
 
@@ -207,7 +207,7 @@ where
 
 impl<T, const D: usize> Zero for ObsCoordBasis<T, D>
 where
-    T: RealField,
+    T:  RealField,
 {
     fn is_zero(&self) -> bool {
         self.coordinates.is_zero() && self.basis.iter().all(|e| e.is_zero())

@@ -8,30 +8,30 @@ repository = "https://github.com/ajefweiss/ocnus/"
 rust-version = "1.92"
 
 [dependencies]
-approx = "*"
-chrono = "*"
-criterion = "*"
-derive_builder = "*"
-derive_more = { version = "*", features = ["full"] }
-dtw = "*"
-env_logger = "*"
-itertools = "*"
-log = "*"
-nalgebra = { version = "*", features = ["rayon", "serde-serialize"] }
-num-traits = "*"
+approx = "0.5.1"
+chrono = "0.4.44"
+criterion = "0.8.2"
+derive_builder = "0.20.2"
+derive_more = { version = "2.1.1", features = ["full"] }
+dtw = "0.1.0"
+env_logger = "0.11.10"
+itertools = "0.14.0"
+log = "0.4.29"
+nalgebra = { version = "0.34.2", features = ["rayon", "serde-serialize"] }
+num-traits = "0.2.19"
 numpy = { version = "0.28.0", features = ["nalgebra"], optional = true }
-paste = { version = "*", optional = true }
+paste = { version = "1.0.15", optional = true }
 pyo3 = { version = "0.28.3", features = ["multiple-pymethods", "extension-module"], optional = true }
-rand = "*"
-rand_distr = "*"
-rand_xoshiro = "*"
-rayon = "*"
-serde = { version = "*", features = ["derive"] }
-serde_arrays = "*"
-serde_json5 = "*"
-typenum = "*"
-thiserror = "*"
-wcs = "*"
+rand = "0.10.1"
+rand_distr = "0.6.0"
+rand_xoshiro = "0.8.0"
+rayon = "1.12.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_arrays = "0.2.0"
+serde_json5 = "0.2.1"
+typenum = "1.20.0"
+thiserror = "2.0.18"
+wcs = "0.4.2"
 
 prodef = { path = "/Users/ajweiss/Projects/prodef-rs" }
 

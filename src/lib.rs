@@ -44,6 +44,9 @@ where
     T: RealField,
     Self: Sync,
 {
+    /// Flag that allows/disallows negative time steps.
+    const ALLOW_NEGATIVE_TIMESTEPS: bool = false;
+
     /// Associated forward model state type.
     type FMST: Clone + Default + Send;
 
@@ -187,7 +190,7 @@ where
             let time_step = conf - last_observation;
             last_observation = conf;
 
-            if time_step < T::zero() {
+            if !Self::ALLOW_NEGATIVE_TIMESTEPS && time_step < T::zero() {
                 return Err(ModelError::Evolution(time_step));
             } else {
                 self.evolve_fmst(time_step, params, fm_state, cs_state)?;

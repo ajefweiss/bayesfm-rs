@@ -4,10 +4,10 @@ use crate::{
     obs::ObsVec,
     pytypes::*,
 };
-use nalgebra::{Const, DMatrix, DVector, DimSum, Dyn, U1};
-use numpy::{PyReadonlyArray2, ToPyArray, ndarray::Dim};
+use nalgebra::{Const, DMatrix, DVector, DimSum, Dyn, SVector, U1};
+use numpy::{PyArray2, PyReadonlyArray2, ToPyArray, ndarray::Dim};
 use paste::paste;
-use pyo3::{exceptions::PyValueError, prelude::*};
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyType};
 
 /// Export the PyEnsblBasicConfObsVec classes.
 #[macro_export]
@@ -30,60 +30,79 @@ macro_rules! impl_py_ensbl_basicconf_obsvec {
             #[pymethods]
             impl [<PyEnsblBasicConf $ndim ObsVec $nval>] {
                 /// Return the inner value of ensemble member(s) as a 2D numpy array.
-                pub fn get<'py>(&self, py: Python<'py>, keys: Bound<PyAny>) -> PyResult<Bound<'py, PyAny>> {
-                    let matrix = if let Ok(key) = keys.extract::<usize>() {
+                pub fn get<'py>(&self, py: Python<'py>, key: usize) -> PyResult<Bound<'py, PyArray2<Float>>> {
+                    let matrix = if key < self.0.len() {
                         let column = self.0.output(key);
 
                         DMatrix::from_iterator(
-                            1,
+                            $nval,
                             self.0.len(),
                             column.iter().flat_map(|value| value.iter().cloned()),
                         )
-                    } else if let Ok(keys) = keys.extract::<Vec<usize>>() {
-                        let columns = self.0.outputs(keys.as_slice());
-
-                        DMatrix::<Float>::from_iterator(
-                            keys.len(),
-                            self.0.len(),
-                            columns.iter().flat_map(|view| view.iter().flat_map(|value| value.iter().cloned())),
-                        )
                     } else {
-                        return Err(PyValueError::new_err("keys argument must be an index or a list of indices"));
+                        return Err(PyValueError::new_err("key must be smaller than ensemble size"));
                     };
 
-                    Ok(matrix.transpose().to_pyarray(py).into_any())
+                    Ok(matrix.transpose().to_pyarray(py))
                 }
 
-                #[new]
-                #[pyo3(signature = (confs_array, opt_ref_data = None))]
-                /// Create a new PyEnsblVec object.
-                pub fn new(
-                    confs_array: PyReadonlyArray2<Float>,
-                    opt_ref_data: Option<PyReadonlyArray2<Float>>,
-                ) -> PyResult<Self>
+                /// Create a new PyEnsblBasicConf object from a BasicConfSeries.
+                #[classmethod]
+                #[pyo3(signature = (initial_timestamp, configuration, size = 1024, opt_ref_data = None))]
+                pub fn from_conf(_cls: &Bound<PyType>, initial_timestamp: Float, configuration: [<PyBasicConf $ndim Series>], size: usize, opt_ref_data: Option<PyReadonlyArray2<Float>>) -> PyResult<Self>
                 {
-                    let confs_array = array_to_matrix::<Dim<[usize; 2]>, DimSum<DimSum<Const<$ndim>, U1>, Const<$ndim>>, Dyn, U1, DimSum<DimSum<Const<$ndim>, U1>, Const<$ndim>>>(confs_array)?;
                     let ref_data = match opt_ref_data {
                         Some(ref_data) => {
                             // This array only contains values and not vectors.
-                            let raw_array = array_to_matrix::<Dim<[usize; 2]>, Const<$nval>, Dyn, U1, Const<$nval>>(ref_data)?;
+                            let matrix = array_to_matrix::<Dim<[usize; 2]>, Const<$nval>, Dyn>(ref_data, "ref_data")?;
 
-                           Some(DVector::from_iterator(raw_array.ncols(), raw_array.column_iter().map(|col| ObsVec::from(col.clone_owned()))))
+                           Some(DVector::from_iterator(matrix.ncols(), matrix.column_iter().map(|col| ObsVec::from(col.clone_owned()))))
                         },
                         None => None
                     };
 
-                    let col_initial = confs_array.column(0);
-                    let initial = BasicConf::from((col_initial[0].clone(), col_initial.fixed_rows::<$ndim>(1), col_initial.fixed_rows::<$ndim>(1 + $ndim)));
+                    let ensblobs = EnsembleObservations::new(
+                        BasicConf::from((initial_timestamp, SVector::from_vec(vec![0.0; $ndim]))),
+                        configuration.0.clone(),
+                        size,
+                        ref_data,
+                    );
 
-                    let size = confs_array.ncols() - 1;
+                    match ensblobs {
+                        Some(ensblobs) => Ok(Self(ensblobs)),
+                        None => Err(PyValueError::new_err(format!("configuration and optional reference data is mismatched in length"))),
+                    }
+                }
 
-                    if size < 1 {
+                #[new]
+                #[pyo3(signature = (configuration, size = 1024, opt_ref_data = None))]
+                /// Create a new PyEnsblBasicConf object from a configuration array.
+                pub fn new(
+                    configuration: PyReadonlyArray2<Float>,
+                    size: usize,
+                    opt_ref_data: Option<PyReadonlyArray2<Float>>,
+                ) -> PyResult<Self>
+                {
+                    let configuration = array_to_matrix::<Dim<[usize; 2]>, DimSum<Const<$ndim>, U1>, Dyn>(configuration, "configuration")?;
+                    let ref_data = match opt_ref_data {
+                        Some(ref_data) => {
+                            // This array only contains values and not vectors.
+                            let matrix = array_to_matrix::<Dim<[usize; 2]>, Const<$nval>, Dyn>(ref_data, "ref_data")?;
+
+                           Some(DVector::from_iterator(matrix.ncols(), matrix.column_iter().map(|col| ObsVec::from(col.clone_owned()))))
+                        },
+                        None => None
+                    };
+
+                    let col_initial = configuration.column(0);
+                    let initial = BasicConf::from((col_initial[0].clone(), &col_initial.fixed_rows::<$ndim>(1)));
+
+                    if configuration.ncols() < 2 {
                         return Err(PyValueError::new_err("Invalid configuration array, column length must be larger than 2"));
                     }
 
-                    let configuration = ConfSeries::new(&confs_array.column_iter().skip(1).map(|col| {
-                        BasicConf::from((col[0].clone(), col.fixed_rows::<$ndim>(1), col.fixed_rows::<$ndim>(1 + $ndim)))
+                    let configuration = ConfSeries::new(&configuration.column_iter().skip(1).map(|col| {
+                        BasicConf::from((col[0].clone(), &col.fixed_rows::<$ndim>(1)))
                     }).collect::<Vec<BasicConf<Float, $ndim>>>());
 
                     let ensblobs = EnsembleObservations::new(
@@ -120,6 +139,7 @@ impl_py_ensbl_basicconf_obsvec!(2, 2);
 impl_py_ensbl_basicconf_obsvec!(3, 1);
 impl_py_ensbl_basicconf_obsvec!(3, 2);
 impl_py_ensbl_basicconf_obsvec!(3, 3);
-impl_py_ensbl_basicconf_obsvec!(3, 4);
+impl_py_ensbl_basicconf_obsvec!(4, 1);
+impl_py_ensbl_basicconf_obsvec!(4, 3);
 
 pub use export_py_ensbl_basicconf_obsvec;

@@ -1,7 +1,7 @@
-use crate::conf::{ConfPosition, ConfTime, ConfVelocity};
+use crate::conf::{ConfPosition, ConfTime};
 use nalgebra::{Const, Dim, RealField, SVector, Scalar, VectorView};
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, ops::Sub};
+use std::{cmp::Ordering, fmt::Debug, ops::Sub};
 
 /// A basic vectorized configuration type, storing a timestamp and a `D`-dimensional position and velocity.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -11,7 +11,6 @@ where
 {
     timestamp: T,
     position: SVector<T, D>,
-    velocity: SVector<T, D>,
 }
 
 impl<T, const D: usize> BasicConf<T, D>
@@ -19,11 +18,10 @@ where
     T: Scalar,
 {
     /// Creates a new vectorized configuration.
-    pub fn new(timestamp: T, position: SVector<T, D>, velocity: SVector<T, D>) -> Self {
+    pub fn new(timestamp: T, position: SVector<T, D>) -> Self {
         Self {
             timestamp,
             position,
-            velocity,
         }
     }
 }
@@ -37,51 +35,43 @@ where
     }
 }
 
-impl<T, const D: usize> ConfVelocity<T, D> for BasicConf<T, D>
-where
-    T: Scalar,
-{
-    fn velocity(&self) -> SVector<T, D> {
-        self.velocity.clone()
-    }
-}
-
 impl<T, const D: usize> ConfTime<T> for BasicConf<T, D>
 where
-    T: Clone + From<u32> + RealField,
-    i64: From<T>,
+    T: RealField,
 {
     fn timestamp(&self) -> T {
         self.timestamp.clone()
     }
 }
 
-impl<T, const D: usize> From<(T, SVector<T, D>, SVector<T, D>)> for BasicConf<T, D>
+impl<T, const D: usize> Default for BasicConf<T, D>
+where
+    T: RealField,
+{
+    fn default() -> Self {
+        Self {
+            timestamp: T::zero(),
+            position: SVector::zeros(),
+        }
+    }
+}
+
+impl<T, const D: usize> From<(T, SVector<T, D>)> for BasicConf<T, D>
 where
     T: Scalar,
 {
-    fn from((timestamp, position, velocity): (T, SVector<T, D>, SVector<T, D>)) -> Self {
-        Self::new(timestamp, position, velocity)
+    fn from((timestamp, position): (T, SVector<T, D>)) -> Self {
+        Self::new(timestamp, position)
     }
 }
 
 impl<'a, T, const D: usize, RStride: Dim, CStride: Dim>
-    From<(
-        T,
-        VectorView<'a, T, Const<D>, RStride, CStride>,
-        VectorView<'a, T, Const<D>, RStride, CStride>,
-    )> for BasicConf<T, D>
+    From<(T, &VectorView<'a, T, Const<D>, RStride, CStride>)> for BasicConf<T, D>
 where
     T: Scalar,
 {
-    fn from(
-        (timestamp, position, velocity): (
-            T,
-            VectorView<'a, T, Const<D>, RStride, CStride>,
-            VectorView<'a, T, Const<D>, RStride, CStride>,
-        ),
-    ) -> Self {
-        Self::new(timestamp, position.clone_owned(), velocity.clone_owned())
+    fn from((timestamp, position): (T, &VectorView<'a, T, Const<D>, RStride, CStride>)) -> Self {
+        Self::new(timestamp, position.clone_owned())
     }
 }
 
@@ -96,7 +86,7 @@ where
 
 impl<'a, T, const D: usize> Sub<&'a BasicConf<T, D>> for &'a BasicConf<T, D>
 where
-    T: Scalar + PartialOrd + Sub<Output = T>,
+    T: PartialOrd + Scalar + Sub<Output = T>,
 {
     type Output = T;
 
@@ -119,23 +109,11 @@ mod tests {
     #[test]
     fn test_conf_combine_and_uncombine() {
         let conf1 = ConfSeries::from_iter([
-            BasicConf::from((
-                0.0,
-                Vector3::new(1.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
-            BasicConf::from((
-                0.1,
-                Vector3::new(2.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
+            BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
+            BasicConf::from((0.1, Vector3::new(2.0, 0.0, 0.0))),
         ]);
 
-        let conf2 = ConfSeries::from_iter([BasicConf::from((
-            0.05,
-            Vector3::new(1.5, 0.0, 0.0),
-            Vector3::new(0.0, 0.0, 0.0),
-        ))]);
+        let conf2 = ConfSeries::from_iter([BasicConf::from((0.05, Vector3::new(1.5, 0.0, 0.0)))]);
 
         // After combining, total length should be 3
         let combined = conf1.clone() + conf2.clone();
@@ -194,26 +172,10 @@ mod tests {
     #[test]
     fn test_conf_subset() {
         let conf = ConfSeries::from_iter([
-            BasicConf::from((
-                0.0,
-                Vector3::new(1.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
-            BasicConf::from((
-                1.0,
-                Vector3::new(2.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
-            BasicConf::from((
-                0.5,
-                Vector3::new(1.5, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
-            BasicConf::from((
-                2.0,
-                Vector3::new(3.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
+            BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
+            BasicConf::from((1.0, Vector3::new(2.0, 0.0, 0.0))),
+            BasicConf::from((0.5, Vector3::new(1.5, 0.0, 0.0))),
+            BasicConf::from((2.0, Vector3::new(3.0, 0.0, 0.0))),
         ]);
 
         // Extract indices 0, 2, 3 (subset of 4 items)
@@ -256,21 +218,9 @@ mod tests {
     #[test]
     fn test_conf_subset_out_of_bounds() {
         let conf = ConfSeries::from_iter([
-            BasicConf::from((
-                0.0,
-                Vector3::new(1.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
-            BasicConf::from((
-                1.0,
-                Vector3::new(2.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
-            BasicConf::from((
-                0.5,
-                Vector3::new(1.5, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
+            BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
+            BasicConf::from((1.0, Vector3::new(2.0, 0.0, 0.0))),
+            BasicConf::from((0.5, Vector3::new(1.5, 0.0, 0.0))),
         ]);
 
         // Try to access index 5 when only 0-2 exist
@@ -284,11 +234,7 @@ mod tests {
     /// Tests that subset() returns None for single out-of-bounds index.
     #[test]
     fn test_conf_subset_single_out_of_bounds() {
-        let conf = ConfSeries::from_iter([BasicConf::from((
-            0.0,
-            Vector3::new(1.0, 0.0, 0.0),
-            Vector3::new(0.0, 0.0, 0.0),
-        ))]);
+        let conf = ConfSeries::from_iter([BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0)))]);
 
         // Try to access index 10 when only 0 exists
         let result = conf.subset(&[10]);
@@ -306,21 +252,9 @@ mod tests {
     fn test_conf_count() {
         // Single observer with 3 configurations
         let single_obs = ConfSeries::from_iter([
-            BasicConf::from((
-                0.0,
-                Vector3::new(1.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
-            BasicConf::from((
-                1.0,
-                Vector3::new(2.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
-            BasicConf::from((
-                0.5,
-                Vector3::new(1.5, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 0.0),
-            )),
+            BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
+            BasicConf::from((1.0, Vector3::new(2.0, 0.0, 0.0))),
+            BasicConf::from((0.5, Vector3::new(1.5, 0.0, 0.0))),
         ]);
         assert_eq!(
             single_obs.count(),
@@ -329,21 +263,9 @@ mod tests {
         );
 
         // Create multi-observer configuration by combining
-        let conf1 = ConfSeries::from_iter([BasicConf::from((
-            0.0,
-            Vector3::new(1.0, 0.0, 0.0),
-            Vector3::new(0.0, 0.0, 0.0),
-        ))]);
-        let conf2 = ConfSeries::from_iter([BasicConf::from((
-            1.0,
-            Vector3::new(2.0, 0.0, 0.0),
-            Vector3::new(0.0, 0.0, 0.0),
-        ))]);
-        let conf3 = ConfSeries::from_iter([BasicConf::from((
-            0.5,
-            Vector3::new(1.5, 0.0, 0.0),
-            Vector3::new(0.0, 0.0, 0.0),
-        ))]);
+        let conf1 = ConfSeries::from_iter([BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0)))]);
+        let conf2 = ConfSeries::from_iter([BasicConf::from((1.0, Vector3::new(2.0, 0.0, 0.0)))]);
+        let conf3 = ConfSeries::from_iter([BasicConf::from((0.5, Vector3::new(1.5, 0.0, 0.0)))]);
 
         let combined = (conf1 + conf2) + conf3;
         assert_eq!(

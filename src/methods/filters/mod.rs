@@ -13,8 +13,7 @@ use crate::{
 };
 use derive_builder::Builder;
 use log::{debug, info};
-use nalgebra::{Const, DVector, Dyn, OMatrix, RealField, SVectorView, Scalar};
-use num_traits::AsPrimitive;
+use nalgebra::{Const, DVector, Dyn, MatrixView, OMatrix, RealField, SVectorView, Scalar};
 use prodef::{Density, SamplingMode};
 use rand_distr::{Distribution, StandardNormal};
 use rayon::prelude::*;
@@ -116,8 +115,8 @@ where
     OC: Scalar,
     OD: Scalar,
     M: EnsembleModel<T, D, P>,
-    M::CSST: std::fmt::Debug + Clone,
-    M::FMST: std::fmt::Debug + Clone,
+    M::CSST: Clone + std::fmt::Debug,
+    M::FMST: Clone + std::fmt::Debug,
 {
     ensbl: EnsembleState<T, M::CSST, M::FMST, D, P>,
 
@@ -139,15 +138,14 @@ where
 
 impl<T, OC, OD, M, const D: usize, const P: usize> ParticleFilter<T, OC, OD, M, D, P>
 where
-    T: Copy + RealField + Sum,
+    T: RealField + Sum,
     OC: Scalar + Sync,
     for<'a> &'a OC: Sub<&'a OC, Output = T>,
     OD: AddAssign + Obs,
     M: EnsembleModel<T, D, P> + Sync,
-    M::FMST: std::fmt::Debug + Clone + Default + Send,
-    M::CSST: std::fmt::Debug + Clone + Default + Send,
+    M::FMST: Clone + std::fmt::Debug + Default + Send,
+    M::CSST: Clone + std::fmt::Debug + Default + Send,
     StandardNormal: Distribution<T>,
-    usize: AsPrimitive<T>,
 {
     /// Return the stored errors.
     pub fn errors(&self) -> &[T] {
@@ -163,12 +161,9 @@ where
     }
 
     /// Compute a a quantile of the field `errors`.
-    pub fn error_quantile(&self, quantile: T) -> Option<T>
-    where
-        T: AsPrimitive<usize>,
-    {
+    pub fn error_quantile(&self, quantile: f64) -> Option<T> {
         assert!(
-            (T::zero()..T::one()).contains(&quantile),
+            (0.0..1.0).contains(&quantile),
             "quantile must be within [0, 1]"
         );
 
@@ -179,7 +174,7 @@ where
 
             errors_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-            Some(errors_sorted[(quantile * tval!(self.errors.len(), usize)).as_()])
+            Some(errors_sorted[(quantile * self.errors.len() as f64) as usize].clone())
         }
     }
 
@@ -314,8 +309,12 @@ where
                 self.random_seed + seed_multiplier * iteration as u64,
             )?;
 
-            self.model
-                .simulate_ensbl(&mut temp_ensbl, &mut temp_obs_ensbl, obs_func, opt_noise)?;
+            self.model.simulate_ensbl_par(
+                &mut temp_ensbl,
+                &mut temp_obs_ensbl,
+                obs_func,
+                opt_noise,
+            )?;
 
             let mut filter_flags = vec![true; temp_ensbl.len()];
 
@@ -368,7 +367,7 @@ where
                 self.obs_ensbl
                     .set_output(counter + edx, &temp_obs_ensbl.output(*idx));
 
-                target_filter_values.push(filter_values[*idx]);
+                target_filter_values.push(filter_values[*idx].clone());
             });
 
             counter += indices.len();
@@ -432,6 +431,11 @@ where
         Ok((target_filter_values, iteration))
     }
 
+    /// Return a reference to the initial observation.
+    pub fn initial(&self) -> &OC {
+        self.obs_ensbl.initial()
+    }
+
     /// Initialize the ensemble from a prior distribution `pdf` with a filtering function `FF`.
     pub fn initialize<G, FF, OF>(
         &mut self,
@@ -440,10 +444,10 @@ where
         pdf: G,
     ) -> Result<(), FilterError<T>>
     where
-        T: AsPrimitive<f64>,
         G: Density<T, Const<P>> + Sync,
         FF: Fn(&[OD], &[OD]) -> (bool, T) + Sync,
         OF: Fn(&M, &OC, &SVectorView<T, P>, &M::FMST, &M::CSST) -> Result<OD, ModelError<T>> + Sync,
+        f64: TryFrom<T>,
     {
         let start = Instant::now();
 
@@ -451,12 +455,13 @@ where
             self.filter(flt_func, obs_func, pdf, &mut None::<&mut NullNoise>, 7573)?;
 
         // Compute quantiles for logging purposes.
-        let quantiles = quantiles(
-            &filter_values,
-            &[tval!(0.34, f64), tval!(0.50, f64), tval!(0.68, f64)],
-        );
+        let quantiles = quantiles(&filter_values, &[0.1587, 0.5, 0.8413]);
 
-        let (q_low, q_mid, q_hgh) = (quantiles[0], quantiles[1], quantiles[2]);
+        let (q_low, q_mid, q_hgh) = (
+            quantiles[0].clone(),
+            quantiles[1].clone(),
+            quantiles[2].clone(),
+        );
 
         debug!(
             "initialize(n={})\n\teps: {:.3} -- {:.3} -- {:.3}\n\tran {:2.3}M evaluations in {:.2} sec",
@@ -495,6 +500,11 @@ where
         self.ensbl.len()
     }
 
+    /// Return a reference to the underlying model.
+    pub fn model(&self) -> &M {
+        &self.model
+    }
+
     /// Create a new [`ParticleFilter`].
     pub fn new(
         model: M,
@@ -517,6 +527,11 @@ where
                 .unwrap_or(ParticleFilterSettingsBuilder::default().build().unwrap()),
             total_runs: 0,
         }
+    }
+
+    /// Returns a reference to the underlying parameter / particle matrix.
+    pub fn particles<'a>(&'a self) -> MatrixView<'a, T, Const<P>, Dyn> {
+        self.ensbl.params()
     }
 
     /// Return the underlying model prior.
@@ -560,15 +575,19 @@ where
 
                 self.model.initialize_states_ensbl(&mut self.ensbl)?;
 
-                self.model
-                    .simulate_ensbl(&mut self.ensbl, &mut obs_ensbl, obs_func, opt_noise)?;
+                self.model.simulate_ensbl_par(
+                    &mut self.ensbl,
+                    &mut obs_ensbl,
+                    obs_func,
+                    opt_noise,
+                )?;
 
                 obs_ensbl
             }
             None => {
                 self.model.initialize_states_ensbl(&mut self.ensbl)?;
 
-                self.model.simulate_ensbl(
+                self.model.simulate_ensbl_par(
                     &mut self.ensbl,
                     &mut self.obs_ensbl,
                     obs_func,

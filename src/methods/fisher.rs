@@ -118,14 +118,14 @@ where
                     obs.1.len(),
                     dmus[rdx]
                         .iter()
-                        .flat_map(|obsvec| obsvec.into_iter().copied()),
+                        .flat_map(|obsvec| obsvec.into_iter().cloned()),
                 );
                 let dmu_b_mat = DMatrix::from_iterator(
                     N,
                     obs.1.len(),
                     dmus[cdx]
                         .iter()
-                        .flat_map(|obsvec| obsvec.into_iter().copied()),
+                        .flat_map(|obsvec| obsvec.into_iter().cloned()),
                 );
 
                 result[(rdx, cdx)] = (0..N)

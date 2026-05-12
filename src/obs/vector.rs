@@ -62,10 +62,12 @@ where
 
     /// Return a normalized vector.
     pub fn normalize(&self) -> Self {
+        let norm = SVector::from(self.0.clone()).norm();
+
         Self::from(
             self.0
                 .iter()
-                .map(|value| value.clone() / SVector::from(self.0.clone()).norm())
+                .map(|value| value.clone() / norm.clone())
                 .collect::<Vec<T>>()
                 .as_slice(),
         )
@@ -421,11 +423,15 @@ pub enum ObsVecMetric {
     NRMSE,
     /// Normalized chi-squared error metric, as used in Nieves-Chinchilla et al. (2019).
     NChiSq,
-    /// Dynamic Time Warping (DTW) metric.
-    DTW,
     /// Validity check between two observation vector slices.
     /// Returns 0 if valid, infinity if invalid.
     Valid,
+}
+
+/// Metric types for comparing two [`ObsVec`] slices.
+pub enum ObsVecSpecialMetric {
+    /// Dynamic Time Warping (DTW) metric.
+    DTW,
 }
 
 /// Returns the error for a specific metric from two [`ObsVec`] slices.
@@ -435,7 +441,7 @@ pub fn ov_error<T, const N: usize>(
     metric: ObsVecMetric,
 ) -> T
 where
-    T: AsPrimitive<f32> + RealField + Sum,
+    T: RealField + Sum,
 {
     match metric {
         ObsVecMetric::MSE => {
@@ -505,8 +511,16 @@ where
                         T::zero()
                     } else if ref_vec.is_valid() && out_vec.is_valid() {
                         (ref_vec - out_vec).sum_of_squares()
-                            + (ref_vec.iter().map(|value| value.powi(2)).sum::<T>().sqrt()
-                                - out_vec.iter().map(|value| value.powi(2)).sum::<T>().sqrt())
+                            + (ref_vec
+                                .iter()
+                                .map(|value| value.clone().powi(2))
+                                .sum::<T>()
+                                .sqrt()
+                                - out_vec
+                                    .iter()
+                                    .map(|value| value.clone().powi(2))
+                                    .sum::<T>()
+                                    .sqrt())
                             .powi(2)
                     } else {
                         T::one() / T::zero()
@@ -528,13 +542,43 @@ where
 
             total_error / tval!(normalizer, usize) / b_max.powi(2)
         }
-        ObsVecMetric::DTW => {
+
+        ObsVecMetric::Valid => {
+            let is_valid = x.iter().zip(y).fold(true, |acc, (out_vec, ref_vec)| {
+                if (!ref_vec.is_valid() && !out_vec.is_valid())
+                    | (ref_vec.is_valid() && out_vec.is_valid())
+                {
+                    acc & true
+                } else {
+                    acc & false
+                }
+            });
+
+            match is_valid {
+                true => T::zero(),
+                false => T::one() / T::zero(),
+            }
+        }
+    }
+}
+
+/// Returns the error for a special metric from two [`ObsVec`] slices.
+pub fn ov_error_special<T, const N: usize>(
+    x: &[ObsVec<T, N>],
+    y: &[ObsVec<T, N>],
+    metric: ObsVecSpecialMetric,
+) -> T
+where
+    T: AsPrimitive<f32> + RealField + Sum,
+{
+    match metric {
+        ObsVecSpecialMetric::DTW => {
             // Collect into DVector for the dtw crate
-            let x_matrix = DVector::<f32>::from_iterator(
+            let x_matrix = DVector::from_iterator(
                 x.len(),
                 x.iter().flat_map(|obs| obs.iter().map(|value| value.as_())),
             );
-            let y_matrix = DVector::<f32>::from_iterator(
+            let y_matrix = DVector::from_iterator(
                 y.len(),
                 y.iter().flat_map(|obs| obs.iter().map(|value| value.as_())),
             );
@@ -567,22 +611,6 @@ where
                 / (dtw_path.len() as f32).sqrt();
 
             T::from_f32(dtw_score).unwrap()
-        }
-        ObsVecMetric::Valid => {
-            let is_valid = x.iter().zip(y).fold(true, |acc, (out_vec, ref_vec)| {
-                if (!ref_vec.is_valid() && !out_vec.is_valid())
-                    | (ref_vec.is_valid() && out_vec.is_valid())
-                {
-                    acc & true
-                } else {
-                    acc & false
-                }
-            });
-
-            match is_valid {
-                true => T::zero(),
-                false => T::one() / T::zero(),
-            }
         }
     }
 }

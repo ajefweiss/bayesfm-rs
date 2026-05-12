@@ -106,7 +106,7 @@ where
                                 .row_iter(),
                         )
                         .for_each(|(res, val)| {
-                            res.set(i, res.get(i).unwrap().clone() + val[(0, 0)].clone())
+                            res.set(i, res.get(i).unwrap().clone() + val[(0, 0)].clone());
                         });
                 }
             }

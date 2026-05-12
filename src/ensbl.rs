@@ -38,6 +38,68 @@ where
     /// Certain operations may use multiples, or fractions, of this value.
     const RAYON_CHUNK_SIZE: usize;
 
+    /// Evolve the forward modeling states of an [`EnsembleState`] by `time_step`.
+    fn evolve_fmst_ensbl(
+        &self,
+        time_step: T,
+        ensbl: &mut EnsembleState<T, Self::CSST, Self::FMST, D, P>,
+    ) -> Result<(), ModelError<T>> {
+        let start = Instant::now();
+
+        if !Self::ALLOW_NEGATIVE_TIMESTEPS && time_step < T::zero() {
+            return Err(ModelError::Evolution(time_step));
+        } else {
+            ensbl
+                .params
+                .column_iter()
+                .zip(ensbl.states.iter_mut())
+                .try_for_each(|(params, (fm_state, cs_state))| {
+                    self.evolve_fmst(time_step.clone(), &params, fm_state, cs_state)?;
+
+                    Ok::<(), ModelError<T>>(())
+                })?;
+        }
+
+        debug!(
+            "evolve_fmst_ensbl: {:2.1}k evaluations in {:.0}ms",
+            ensbl.len() as f64 / 1e3,
+            start.elapsed().as_millis() as f64
+        );
+
+        Ok(())
+    }
+
+    /// Evolve the forward modeling states of an [`EnsembleState`] by `time_step`, in parallel.
+    fn evolve_fmst_ensbl_par(
+        &self,
+        time_step: T,
+        ensbl: &mut EnsembleState<T, Self::CSST, Self::FMST, D, P>,
+    ) -> Result<(), ModelError<T>> {
+        let start = Instant::now();
+
+        if !Self::ALLOW_NEGATIVE_TIMESTEPS && time_step < T::zero() {
+            return Err(ModelError::Evolution(time_step));
+        } else {
+            ensbl
+                .params
+                .par_column_iter()
+                .zip(ensbl.states.par_iter_mut())
+                .try_for_each(|(params, (fm_state, cs_state))| {
+                    self.evolve_fmst(time_step.clone(), &params, fm_state, cs_state)?;
+
+                    Ok::<(), ModelError<T>>(())
+                })?;
+        }
+
+        debug!(
+            "evolve_fmst_ensbl: {:2.1}k evaluations in {:.0}ms",
+            ensbl.len() as f64 / 1e3,
+            start.elapsed().as_millis() as f64
+        );
+
+        Ok(())
+    }
+
     /// Initialize the model parameters, and both the coordinate system and forward model states for an ensemble.
     fn initialize_ensbl<G>(
         &self,
@@ -192,16 +254,16 @@ where {
     {
         let start = Instant::now();
 
-        let mut last_observation = &obs_ensbl.initial().clone();
+        let mut last_observation = obs_ensbl.initial().clone();
 
         obs_ensbl
             .time_iter_mut()
             .try_for_each(|(conf, mut obs_row)| {
                 // Compute time step to next configuration.
-                let time_step = conf - last_observation;
-                last_observation = conf;
+                let time_step = conf - &last_observation;
+                last_observation = conf.clone();
 
-                if time_step < T::zero() {
+                if !Self::ALLOW_NEGATIVE_TIMESTEPS && time_step < T::zero() {
                     return Err(ModelError::Evolution(time_step));
                 } else {
                     ensbl
@@ -265,16 +327,16 @@ where {
     {
         let start = Instant::now();
 
-        let mut last_observation = &obs_ensbl.initial().clone();
+        let mut last_observation = obs_ensbl.initial().clone();
 
         obs_ensbl
             .time_iter_mut()
             .try_for_each(|(conf, mut obs_row)| {
                 // Compute time step to next configuration.
-                let time_step = conf - last_observation;
-                last_observation = conf;
+                let time_step = conf - &last_observation;
+                last_observation = conf.clone();
 
-                if time_step < T::zero() {
+                if !Self::ALLOW_NEGATIVE_TIMESTEPS && time_step < T::zero() {
                     return Err(ModelError::Evolution(time_step));
                 } else {
                     ensbl
@@ -597,7 +659,7 @@ where
     CSST: Deserialize<'de>"))]
 pub struct EnsembleState<T, CSST, FMST, const D: usize, const P: usize>
 where
-    T: RealField,
+    T: Scalar,
 {
     /// Input parameters for each ensemble member.
     params: OMatrix<T, Const<P>, Dyn>,
@@ -621,6 +683,21 @@ where
         model.initialize_states_ensbl(self)?;
 
         Ok(())
+    }
+
+    /// Create a new [`EnsembleState`] from a matrix of parameters.
+    pub fn from_matrix(matrix: OMatrix<T, Const<P>, Dyn>) -> Self
+    where
+        FMST: Clone + Default,
+        CSST: Clone + Default,
+    {
+        let size = matrix.ncols();
+
+        Self {
+            params: matrix,
+            states: vec![(FMST::default(), CSST::default()); size],
+            opt_weights: None,
+        }
     }
 
     /// Returns true if the ensemble contains no members.

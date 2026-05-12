@@ -1,22 +1,463 @@
+/// A macro that generates a function that creates a new custom filter.
+#[macro_export]
+macro_rules! py_add_model_functions {
+    ($model: ty, $name: ident, $nparams: expr) => {
+        paste::paste! {
+            #[pyo3::pymethods]
+            impl $name {
+                /// Return the names of the model parameters.
+                #[classmethod]
+                pub fn names(_cls: &pyo3::Bound<pyo3::types::PyType>,) -> Vec<String> {
+                    $model::<Float, prodef::MultivariateDensity<Float, nalgebra::Const<$nparams>>>::PARAM_NAMES.iter().map(|name| name.to_string()).collect()
+                }
+            }
+        }
+    };
+}
+
+/// A macro that generates a function that creates a new custom filter.
+#[macro_export]
+macro_rules! py_add_model_filter {
+    ($model: ty, $name: ident, $nparams: expr, $filter_name: literal, $conf_ndim: expr, $obs_ndim: expr, $model_ndim: expr) => {
+        paste::paste! {
+            #[derive(Clone)]
+            #[doc = "The " $filter_name " filter for the " $name " model."]
+            #[pyo3::pyclass(from_py_object)]
+            pub struct [< $name $filter_name Filter >] (
+                pub bayesfm::methods::filters::ParticleFilter<Float, bayesfm::conf::BasicConf<Float, $conf_ndim>, bayesfm::obs::ObsVec<Float, $obs_ndim>, $model<Float, prodef::MultivariateDensity<Float, nalgebra::Const<$nparams>>>, $model_ndim, $nparams>,
+            );
+
+            #[pyo3::pymethods]
+            impl $name {
+                #[pyo3(signature = (initial, configuration, ref_data, **opt_kwargs))]
+                /// Create a new filter object from a model.
+                pub fn [<new_ $filter_name:lower _filter>]<'py>(
+                    &self,
+                    py: pyo3::Python<'py>,
+                    initial: bayesfm::pytypes:: [< PyBasicConf $conf_ndim>],
+                    configuration: bayesfm::pytypes:: [< PyBasicConf $conf_ndim Series>],
+                    ref_data: numpy::PyReadonlyArray2<Float>,
+                    opt_kwargs: Option<&pyo3::Bound<'_, pyo3::types::PyDict>>
+                ) -> pyo3::PyResult<[<$name $filter_name Filter>]>
+                {
+                    // Exctract initial seed and size.
+                    let (initial_seed, size) = match opt_kwargs {
+                        Some(kwargs)  => {
+                            let initial_seed = match pyo3::types::PyDictMethods::get_item(kwargs, "initial_seed")? {
+                                Some(value) => pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None => 42,
+                            };
+                            let size = match pyo3::types::PyDictMethods::get_item(kwargs, "size")? {
+                                Some(value) => pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None => 1024,
+                            };
+
+                            (initial_seed, size)
+                        },
+                        None => (42, 1024),
+                    };
+
+                    // Convert ref_data to a vector
+                    let matrix = bayesfm::pytypes::array_to_matrix::<numpy::ndarray::Dim<[usize; 2]>, nalgebra::Const<$obs_ndim>, nalgebra::Dyn>(ref_data, "ref_data")?;
+                    let ref_vector = nalgebra::DVector::from_iterator(matrix.ncols(), matrix.column_iter().map(|col| bayesfm::obs::ObsVec::from(col.clone_owned())));
+
+                    let obs_ensbl = match bayesfm::EnsembleObservations::new(initial.0, configuration.0, size, Some(ref_vector)) {
+                        Some(obs_ensbl) => obs_ensbl,
+                        None => return Err(pyo3::exceptions::PyRuntimeError::new_err("length of the configuration series does not match the length of ref_data")),
+                    };
+
+                    let ensbl = bayesfm::EnsembleState::new_zeros(size);
+
+                    let mut fobj = py.detach(|| {
+                        bayesfm::methods::filters::ParticleFilter::new(self.0.clone(), ensbl, obs_ensbl, initial_seed, None)
+                    });
+
+                    match opt_kwargs {
+                        Some(kwargs) => {
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "exploration_factor")? {
+                                Some(value) => fobj.settings.exploration_factor = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "max_sample_attempts")? {
+                                Some(value) => fobj.settings.sampling_mode = prodef::SamplingMode::UntilValid { max_attempts: pyo3::FromPyObject::extract(value.as_borrowed())? },
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "max_iterations")? {
+                                Some(value) => fobj.settings.max_iterations = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "effective_particle_threshold_factor")? {
+                                Some(value) => fobj.settings.effective_particle_threshold_factor = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "simulation_ensemble_size_factor")? {
+                                Some(value) => fobj.settings.simulation_ensemble_size_factor = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "simulation_time_limit")? {
+                                Some(value) => fobj.settings.simulation_time_limit = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "simulation_time_prediction")? {
+                                Some(value) => fobj.settings.simulation_time_prediction = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                        },
+                        _ => ()
+                    }
+
+                    Ok([<$name $filter_name Filter>](fobj))
+                }
+
+                #[pyo3(signature = (initial, configuration, ref_data, input, **opt_kwargs))]
+                /// Create a new filter object from a model and input ensemble.
+                pub fn new_mag_filter_with_particles<'py>(
+                    &self,
+                    py: pyo3::Python<'py>,
+                    initial: bayesfm::pytypes:: [< PyBasicConf $conf_ndim>],
+                    configuration: bayesfm::pytypes:: [< PyBasicConf $conf_ndim Series>],
+                    ref_data: numpy::PyReadonlyArray2<Float>,
+                    input: numpy::PyReadonlyArray2<Float>,
+                    opt_kwargs: Option<&pyo3::Bound<'_, pyo3::types::PyDict>>,
+                ) -> pyo3::PyResult<[<$name $filter_name Filter>]> {
+                    // Exctract initial seed and size.
+                    let initial_seed = match opt_kwargs {
+                        Some(kwargs)  => {
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "initial_seed")? {
+                                Some(value) => pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None => 42,
+                            }
+                        },
+                        None => 42,
+                    };
+
+                    // Convert ref_data to a vector
+                    let matrix = bayesfm::pytypes::array_to_matrix::<numpy::ndarray::Dim<[usize; 2]>, nalgebra::Const<$obs_ndim>, nalgebra::Dyn>(ref_data, "ref_data")?;
+                    let ref_vector = nalgebra::DVector::from_iterator(matrix.ncols(), matrix.column_iter().map(|col| bayesfm::obs::ObsVec::from(col.clone_owned())));
+
+                    let matrix = bayesfm::pytypes::array_to_matrix::<numpy::ndarray::Dim<[usize; 2]>, nalgebra::Const<$nparams>, nalgebra::Dyn>(input, "input")?;
+
+                    let ensbl = bayesfm::EnsembleState::from_matrix(matrix);
+
+                    let obs_ensbl = match bayesfm::EnsembleObservations::new(initial.0, configuration.0, ensbl.len(), Some(ref_vector)) {
+                        Some(obs_ensbl) => obs_ensbl,
+                        None => return Err(pyo3::exceptions::PyRuntimeError::new_err("length of the configuration series does not match the length of ref_data")),
+                    };
+
+                    let mut fobj = py.detach(|| {
+                        bayesfm::methods::filters::ParticleFilter::new(self.0.clone(), ensbl, obs_ensbl, initial_seed, None)
+                    });
+
+                    match opt_kwargs {
+                        Some(kwargs) => {
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "exploration_factor")? {
+                                Some(value) => fobj.settings.exploration_factor = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "max_sample_attempts")? {
+                                Some(value) => fobj.settings.sampling_mode = prodef::SamplingMode::UntilValid { max_attempts: pyo3::FromPyObject::extract(value.as_borrowed())? },
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "max_iterations")? {
+                                Some(value) => fobj.settings.max_iterations = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "effective_particle_threshold_factor")? {
+                                Some(value) => fobj.settings.effective_particle_threshold_factor = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "simulation_ensemble_size_factor")? {
+                                Some(value) => fobj.settings.simulation_ensemble_size_factor = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "simulation_time_limit")? {
+                                Some(value) => fobj.settings.simulation_time_limit = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                            match pyo3::types::PyDictMethods::get_item(kwargs, "simulation_time_prediction")? {
+                                Some(value) => fobj.settings.simulation_time_prediction = pyo3::FromPyObject::extract(value.as_borrowed())?,
+                                None =>(),
+                            }
+                        },
+                        _ => ()
+                    };
+
+                    Ok([<$name $filter_name Filter>](fobj))
+                }
+            }
+
+            #[pyo3::pymethods]
+            impl [<$name $filter_name Filter>] {
+                /// Approximate Bayesian Computation iteration with Multivariate Normal Kernel.
+                pub fn [< abc_mvnk_ $filter_name:lower>]<'py>(&mut self, py: pyo3::Python<'py>, metric: String, threshold: Float, noise: &mut bayesfm::pytypes::PyObsVecNoise) -> pyo3::PyResult<Float> {
+                    let error = bayesfm::py_select_error_metric!(metric, bayesfm::obs::ObsVec<Float, $obs_ndim>);
+
+                    py.detach(|| bayesfm::py_unroll_filter_errors!(self.0.abc_mvnk((&error, threshold), &$model::[< observe_ $filter_name:lower >], &mut noise.0)))
+                }
+
+                 /// Create a copy of the filter object.
+                pub fn copy(&self) -> Self {
+                    Self(self.0.clone())
+                }
+
+                 /// Differential evolution step.
+                pub fn [< dev_ $filter_name:lower >]<'py>(&mut self, py: pyo3::Python<'py>, metric: String, mutation_factor: Float, recombination_factor: Float) -> pyo3::PyResult<usize> {
+                    let error = bayesfm::py_select_error_metric!(metric, bayesfm::obs::ObsVec<Float, $obs_ndim>);
+
+                    py.detach(|| bayesfm::py_unroll_model_errors!(self.0.dev(&error, &$model::[< observe_ $filter_name:lower >],(mutation_factor, recombination_factor))))
+                }
+
+                /// Return the errors of the current observation ensemble.
+                pub fn errors(&self) -> Vec<Float> {
+                    self.0.errors().iter().cloned().collect()
+                }
+
+                /// Return the error quantile of the current observation ensemble.
+                pub fn error_quantile(&self, value: Float) -> Float {
+                    self.0.error_quantile(value).unwrap()
+                }
+
+                /// Initialize the filter with a given error metric and threshold.
+                #[pyo3(signature = (metric="all".to_string(), threshold=1.0) )]
+                pub fn [< initialize_ $filter_name:lower >]<'py>(&mut self, py: pyo3::Python<'py>, metric: String, threshold: Float) -> pyo3::PyResult<()> {
+                    let error = bayesfm::py_select_error_metric!(metric, bayesfm::obs::ObsVec<Float, $obs_ndim>);
+                    let filter = |o1: &[bayesfm::obs::ObsVec<Float, $obs_ndim>], o2: &[bayesfm::obs::ObsVec<Float, $obs_ndim>]| (error(o1, o2) < threshold, error(o1, o2));
+
+                    py.detach(|| {
+                        let prior = self.0.prior().clone();
+                        bayesfm::py_unroll_filter_errors!(self.0.initialize(&filter,  &$model::[<observe_ $filter_name:lower >], prior))
+                    })
+                }
+
+                /// Return the likelihoods of the current observation ensemble given a covariance matrix.
+                pub fn likelihoods<'py>(&self, py: pyo3::Python<'py>, covariance: numpy::PyReadonlyArray2<Float>) -> pyo3::PyResult<Vec<Float>> {
+                    let matrix = bayesfm::pytypes::array_to_matrix::<numpy::ndarray::Dim<[usize; 2]>, nalgebra::Dyn, nalgebra::Dyn>(covariance, "covariance")?;
+                    let params = matrix.nrows();
+
+                    let mvnpdf = prodef::MultivariateNormalDensity::new(matrix, prodef::Domain::new_udomain(nalgebra::Dyn(params)), None).unwrap();
+
+                    let llh = |o1: &[bayesfm::obs::ObsVec<Float, $obs_ndim>], o2: &[bayesfm::obs::ObsVec<Float, $obs_ndim>]| {
+                        let mut value = bayesfm::obs::ov_error(o1, o2, bayesfm::obs::ObsVecMetric::Valid);
+
+                        if value == 0.0 {
+                            for i in 0..3 {
+                                let veca = nalgebra::DVector::from_iterator(params, o1.iter().map(|ov| match ov[i].is_finite() {
+                                    true => ov[i],
+                                    false => 0.0,
+                                }));
+
+                                let vecb = nalgebra::DVector::from_iterator(params, o2.iter().map(|ov| match ov[i].is_finite() {
+                                    true => ov[i],
+                                    false => 0.0,
+                                }));
+
+                                let delta = vecb - veca;
+
+                                value -= mvnpdf.mahalanobis_distance_sq::<nalgebra::U1, nalgebra::Dyn>(&delta.as_view());
+                            }
+                        }
+
+                        value
+                    };
+
+                    py.detach(|| {
+                        Ok(self.0.errors_func(&llh))
+                    })
+                }
+
+                 /// Return the covariance matrix of the particle filter kernel.
+                pub fn mvnk<'py>(&self, py: pyo3::Python<'py>) -> pyo3::Bound<'py, numpy::PyArray2<Float>> {
+                    let mvnk: prodef::MultivariateNormalDensity<Float, nalgebra::Const<$nparams>> =
+                        prodef::MultivariateNormalDensity::from_vectors::<nalgebra::U1, nalgebra::Const<$nparams>>(
+                            &self.0.particles().as_view(),
+                            prodef::Domain::new_udomain(nalgebra::Const::<$nparams>),
+                            self.0.weights().map(|w| w.as_slice()),
+                        )
+                        .unwrap();
+
+                    numpy::ToPyArray::to_pyarray(&mvnk.covariance_matrix().clone_owned(), py)
+                }
+
+                /// Return the covariance matrix of the particle filter kernel.
+                pub fn mvnk_ltm<'py>(&self, py: pyo3::Python<'py>) -> pyo3::Bound<'py, numpy::PyArray2<Float>> {
+                    let mvnk: prodef::MultivariateNormalDensity<Float, nalgebra::Const<$nparams>> =
+                        prodef::MultivariateNormalDensity::from_vectors::<nalgebra::U1, nalgebra::Const<$nparams>>(
+                            &self.0.particles().as_view(),
+                            prodef::Domain::new_udomain(nalgebra::Const::<$nparams>),
+                            self.0.weights().map(|w| w.as_slice()),
+                        )
+                        .unwrap();
+
+                    numpy::ToPyArray::to_pyarray(&mvnk.lower_triangular_matrix().transpose().clone_owned(), py)
+                }
+
+                /// Return the particles and their weights as numpy arrays.
+                pub fn particles<'py>(&self, py: pyo3::Python<'py>) -> (pyo3::Bound<'py, numpy::PyArray2<Float>>, Option<Vec<Float>>) {
+                    (
+                        numpy::ToPyArray::to_pyarray(&self.0.particles().transpose().clone_owned(), py),
+                        self.0.weights().as_ref().map(|w| w.iter().cloned().collect::<Vec<Float>>())
+                    )
+                }
+
+                /// Simulate observations and return the observation ensemble and errors.
+                #[pyo3(signature = (opt_configuration = None))]
+                pub fn simulate(
+                    &mut self,
+                    opt_configuration: Option<bayesfm::pytypes:: [< PyBasicConf $conf_ndim Series>]>,
+                ) -> pyo3::PyResult<bayesfm::pytypes:: [<PyEnsblBasicConf $conf_ndim ObsVec $obs_ndim>]> {
+                    let obs_ensbl = match opt_configuration {
+                        Some(configuration) => {
+                            bayesfm::py_unroll_filter_errors!(self.0.simulate(Some(&configuration.0), None, &$model::[< observe_ $filter_name:lower >], &mut None::<&mut bayesfm::noise::NullNoise>))
+
+                        },
+                        _ => bayesfm::py_unroll_filter_errors!(self.0.simulate(None, None, &$model::[< observe_ $filter_name:lower >], &mut None::<&mut bayesfm::noise::NullNoise>)),
+
+                    }?;
+
+                    Ok(obs_ensbl.into())
+                }
+
+                /// Simulate observations and return the observation ensemble and errors.
+                #[pyo3(signature = (metric="rmse".to_string(), opt_configuration = None, opt_ref_data = None))]
+                pub fn simulate_with_errors<'py>(
+                    &mut self,
+                    py: pyo3::Python<'py>,
+                    metric: String,
+                    opt_configuration: Option<bayesfm::pytypes:: [< PyBasicConf $conf_ndim Series>]>,
+                    opt_ref_data: Option<numpy::PyReadonlyArray2<Float>>
+                ) -> pyo3::PyResult<(bayesfm::pytypes:: [<PyEnsblBasicConf $conf_ndim ObsVec $obs_ndim>], Vec<Float>)> {
+                    let error = bayesfm::py_select_error_metric!(metric, bayesfm::obs::ObsVec<Float, $obs_ndim>);
+
+                    let obs_ensbl = match (opt_configuration, opt_ref_data) {
+                        (Some(configuration), Some(ref_data)) => {
+                            let iter = bayesfm::py_any_iterator!(ref_data, [Float; $obs_ndim]).map(bayesfm::obs::ObsVec::from);
+
+                            bayesfm::py_unroll_filter_errors!(self.0.simulate(Some(&configuration.0), Some(&nalgebra::DVector::from(Vec::from_iter(iter))), &$model::[< observe_ $filter_name:lower >], &mut None::<&mut bayesfm::noise::NullNoise>))
+
+                        },
+                        (None, None) => bayesfm::py_unroll_filter_errors!(self.0.simulate(None, None, &$model::[< observe_ $filter_name:lower >], &mut None::<&mut bayesfm::noise::NullNoise>)),
+                        _ => Err(pyo3::exceptions::PyValueError::new_err("a new observation must be combined with a new reference data"))?,
+                    }?;
+
+                    py.detach(|| {
+                        let errors = obs_ensbl.errors_func(&error);
+
+                        Ok((obs_ensbl.into(), errors))
+                    })
+                }
+
+                /// Return the size of the filter object ensemble.
+                pub fn size(&self) -> usize {
+                    self.0.len()
+                }
+            }
+        }
+    };
+}
+
+/// A macro that generates a function to simulate an observable.
+#[macro_export]
+macro_rules! py_add_model_simulation {
+    ($model: ty, $name: ident, $nparams: expr, $observable: expr, $conf_ndim: expr, $obs_ndim: expr) => {
+        paste::paste! {
+            #[pyo3::pymethods]
+            impl $name
+            {
+                #[doc = "Simulate the" $observable "for a configuration time-series and input array."]
+                #[pyo3(signature = (initial, configuration, input, opt_noise = None))]
+                pub fn [< simulate_ $observable >]<'py>(
+                    &self,
+                    py: pyo3::Python<'py>,
+                    initial: bayesfm::pytypes:: [< PyBasicConf $conf_ndim>],
+                    configuration: bayesfm::pytypes:: [<PyBasicConf $conf_ndim Series>],
+                    input: numpy::PyReadonlyArray2<Float>,
+                    opt_noise: Option<bayesfm::pytypes::PyObsVecNoise>
+                ) -> pyo3::PyResult<bayesfm::pytypes:: [<PyEnsblBasicConf $conf_ndim ObsVec $obs_ndim>]> {
+                    let matrix = bayesfm::pytypes::array_to_matrix::<numpy::ndarray::Dim<[usize; 2]>, nalgebra::Const<$nparams>, nalgebra::Dyn>(input, "input")?;
+
+                    py.detach(|| {
+                        let mut obs_ensbl = bayesfm::EnsembleObservations::new(initial.0, configuration.0, matrix.ncols(), None).unwrap();
+
+                        let mut ensbl = bayesfm::EnsembleState::new(matrix.clone_owned(), None, None);
+                        bayesfm::py_unroll_model_errors!(ensbl.initialize(&self.0))?;
+
+                        match opt_noise {
+                            Some(noise) => bayesfm::py_unroll_model_errors!(bayesfm::EnsembleModel::simulate_ensbl_par(&self.0, &mut ensbl, &mut obs_ensbl, &$model::[<observe_ $observable >], &mut Some(&mut noise.0.clone())))?,
+                            None => bayesfm::py_unroll_model_errors!(bayesfm::EnsembleModel::simulate_ensbl_par(&self.0, &mut ensbl, &mut obs_ensbl, &$model::[<observe_ $observable >], &mut None::<&mut bayesfm::noise::NullNoise>))?
+                        }
+
+                        Ok(obs_ensbl.clone().into())
+                    })
+                }
+            }
+        }
+    };
+}
+
+/// Convert a python iterator to an iterator of a specific type.
+#[macro_export]
+macro_rules! py_any_iterator {
+    ($iterator: expr, $type: ty) => {
+        match $iterator.try_iter() {
+            Ok(value) => value.map(|py_obj| py_obj.unwrap().extract::<$type>().unwrap()),
+            Err(..) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Values argument must be iterable",
+                ))
+            }
+        }
+    };
+}
+
 /// Select an error metric function based on the provided metric name.
 #[macro_export]
-macro_rules! select_error_metric {
+macro_rules! py_select_error_metric {
     ($metric: expr, $type: ty) => {
         match $metric.to_lowercase().as_str() {
-            "valid" => |o1: &[$type], o2: &[$type]| ov_error(o1, o2, ObsVecMetric::Valid),
-            "nchisq" => |o1: &[$type], o2: &[$type]| ov_error(o1, o2, ObsVecMetric::NChiSq),
-            "rmse" => |o1: &[$type], o2: &[$type]| ov_error(o1, o2, ObsVecMetric::RMSE),
-            "rmspe" => |o1: &[$type], o2: &[$type]| ov_error(o1, o2, ObsVecMetric::RMSPE),
-            "nrmse" => |o1: &[$type], o2: &[$type]| ov_error(o1, o2, ObsVecMetric::NRMSE),
-            "dtw" => |o1: &[$type], o2: &[$type]| ov_error(o1, o2, ObsVecMetric::DTW),
-            _ => return Err(PyValueError::new_err("Unsupported metric")),
+            "valid" => |o1: &[$type], o2: &[$type]| {
+                bayesfm::obs::ov_error(o1, o2, bayesfm::obs::ObsVecMetric::Valid)
+            },
+            "nchisq" => |o1: &[$type], o2: &[$type]| {
+                bayesfm::obs::ov_error(o1, o2, bayesfm::obs::ObsVecMetric::NChiSq)
+            },
+            "rmse" => |o1: &[$type], o2: &[$type]| {
+                bayesfm::obs::ov_error(o1, o2, bayesfm::obs::ObsVecMetric::RMSE)
+            },
+            "rmspe" => |o1: &[$type], o2: &[$type]| {
+                bayesfm::obs::ov_error(o1, o2, bayesfm::obs::ObsVecMetric::RMSPE)
+            },
+            "nrmse" => |o1: &[$type], o2: &[$type]| {
+                bayesfm::obs::ov_error(o1, o2, bayesfm::obs::ObsVecMetric::NRMSE)
+            },
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Unsupported metric",
+                ))
+            }
+        }
+    };
+}
+
+/// Select an error metric function based on the provided metric name.
+#[macro_export]
+macro_rules! py_select_error_special_metric {
+    ($metric: expr, $type: ty) => {
+        match $metric.to_lowercase().as_str() {
+            "dtw" => |o1: &[$type], o2: &[$type]| {
+                ov_error(o1, o2, bayesfm::obs::ObsVecSpecialMetric::DTW)
+            },
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Unsupported metric",
+                ))
+            }
         }
     };
 }
 
 /// Unroll model errors into Python exceptions.
 #[macro_export]
-macro_rules! unroll_model_errors {
+macro_rules! py_unroll_model_errors {
     ($match: expr) => {
         match $match {
             Ok(result) => Ok(result),
@@ -39,19 +480,23 @@ macro_rules! unroll_model_errors {
 
 /// Unroll filter errors into Python exceptions.
 #[macro_export]
-macro_rules! unroll_filter_errors {
+macro_rules! py_unroll_filter_errors {
     ($match: expr) => {
         match $match {
             Ok(result) => Ok(result),
             Err(err) => match err {
-                bayesfm::methods::filters::FilterError::TimeLimit { limit, .. } => Err(
-                    PyRuntimeError::new_err(("The time limit of", limit, "seconds was exceeded")),
-                ),
+                bayesfm::methods::filters::FilterError::TimeLimit { limit, .. } => {
+                    Err(pyo3::exceptions::PyRuntimeError::new_err((
+                        "The time limit of",
+                        limit,
+                        "seconds was exceeded",
+                    )))
+                }
                 bayesfm::methods::filters::FilterError::TimeLimitPredicted {
                     predicted,
                     limit,
                     ..
-                } => Err(PyRuntimeError::new_err((
+                } => Err(pyo3::exceptions::PyRuntimeError::new_err((
                     "The time limit of",
                     limit,
                     "seconds was predicted to be exceeded with ",
@@ -59,15 +504,35 @@ macro_rules! unroll_filter_errors {
                     "seconds",
                 ))),
                 bayesfm::methods::filters::FilterError::Model(model_err) => {
-                    unroll_model_errors!(Err(model_err))
+                    bayesfm::py_unroll_model_errors!(Err(model_err))
                 }
-                bayesfm::methods::filters::FilterError::EffectiveParticles(count) => Err(
-                    PyRuntimeError::new_err(("Insufficient effective particles (", count, ")")),
-                ),
-                _ => Err(PyRuntimeError::new_err("Unhandled particle filter error")),
+                bayesfm::methods::filters::FilterError::EffectiveParticles(count) => {
+                    Err(pyo3::exceptions::PyRuntimeError::new_err((
+                        "Insufficient effective particles (",
+                        count,
+                        ")",
+                    )))
+                }
+                _ => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "Unhandled particle filter error",
+                )),
             },
         }
     };
 }
 
-pub use {select_error_metric, unroll_filter_errors, unroll_model_errors};
+/// Unwrap a PyResult, returning an error with a custom message on [`Err`].
+#[macro_export]
+macro_rules! py_unwrap {
+    ($expr: expr, $text: literal) => {
+        match $expr {
+            Some(value) => value,
+            None => return Err(pyo3::exceptions::PyValueError::new_err($text)),
+        }
+    };
+}
+
+pub use {
+    py_add_model_filter, py_add_model_functions, py_any_iterator, py_select_error_metric,
+    py_select_error_special_metric, py_unroll_filter_errors, py_unroll_model_errors, py_unwrap,
+};

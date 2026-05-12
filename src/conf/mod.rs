@@ -6,7 +6,7 @@
 //!
 //! ### Creating and Combining Configurations
 //! ```
-//! use bayesfm::ConfSeries;
+//! use bayesfm::conf::ConfSeries;
 //!
 //! let obs1 = ConfSeries::<i32>::from_iter(vec![0, 1, 2]);
 //! let obs2 = ConfSeries::<i32>::from_iter(vec![3, 4]);
@@ -17,7 +17,7 @@
 //!
 //! ### Uncombining Composite Configurations
 //! ```
-//! use bayesfm::ConfSeries;
+//! use bayesfm::conf::ConfSeries;
 //!
 //! let obs1 = ConfSeries::<i32>::from_iter(vec![0, 1, 2]);
 //! let obs2 = ConfSeries::<i32>::from_iter(vec![3, 4]);
@@ -29,6 +29,7 @@
 mod basic;
 
 pub use basic::*;
+use num_traits::AsPrimitive;
 
 use crate::tval;
 use chrono::{DateTime, Datelike, Timelike, Utc};
@@ -37,6 +38,7 @@ use nalgebra::{RealField, SVector, Scalar};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::max,
+    fmt::Debug,
     ops::{Add, AddAssign},
 };
 
@@ -70,7 +72,7 @@ use std::{
 /// ## Single Observer
 ///
 /// ```
-/// use bayesfm::ConfSeries;
+/// use bayesfm::conf::ConfSeries;
 ///
 /// let conf = ConfSeries::<i32>::from_iter(vec![0, 1, 2]);
 /// // conf.configuration = [0, 1, 2]
@@ -80,7 +82,7 @@ use std::{
 /// ## Combining Multiple Observers
 ///
 /// ```
-/// use bayesfm::ConfSeries;
+/// use bayesfm::conf::ConfSeries;
 ///
 /// // Observer 0 has observations at times 0, 1
 /// let conf_obs0 = ConfSeries::<i32>::from_iter(vec![0, 1]);
@@ -101,7 +103,7 @@ use std::{
 /// ## Uncombining Composite Configurations
 ///
 /// ```
-/// use bayesfm::ConfSeries;
+/// use bayesfm::conf::ConfSeries;
 ///
 /// let conf_obs0 = ConfSeries::<i32>::from_iter(vec![0, 1]);
 /// let conf_obs1 = ConfSeries::<i32>::from_iter(vec![2, 3, 4]);
@@ -115,7 +117,7 @@ use std::{
 /// ## Single Observer
 /// Filter results from one source:
 /// ```
-/// use bayesfm::ConfSeries;
+/// use bayesfm::conf::ConfSeries;
 ///
 /// let conf = ConfSeries::<i32>::from_iter(vec![0, 1, 2]);
 /// let observations = vec![0.5, 1.5, 2.5];
@@ -125,7 +127,7 @@ use std::{
 /// ## Multiple Observers
 /// Handle data from multiple instruments or locations:
 /// ```
-/// use bayesfm::ConfSeries;
+/// use bayesfm::conf::ConfSeries;
 ///
 /// let satellite_obs = ConfSeries::<i32>::from_iter(vec![0, 1]);
 /// let ground_station_obs = ConfSeries::<i32>::from_iter(vec![2, 3]);
@@ -400,7 +402,7 @@ impl<OC> FromIterator<OC> for ConfSeries<OC> {
     }
 }
 
-/// A trait for configurations providing position information.
+/// A trait for configurations providing positional information.
 pub trait ConfPosition<T, const D: usize>
 where
     T: Scalar,
@@ -413,18 +415,23 @@ where
 pub trait ConfTime<T>: Scalar
 where
     T: RealField,
-    i64: From<T>,
 {
     /// Returns the day of the year.
-    fn day_of_year(&self) -> usize {
-        let datetime = DateTime::<Utc>::from_timestamp(self.timestamp().clone().into(), 0)
-            .expect("Invalid timestamp");
+    fn day_of_year(&self) -> usize
+    where
+        T: AsPrimitive<i64>,
+    {
+        let datetime =
+            DateTime::<Utc>::from_timestamp(self.timestamp().as_(), 0).expect("Invalid timestamp");
 
         datetime.ordinal() as usize
     }
 
     /// Returns the local solar time in hours.
-    fn local_solar_time(&self, geodetic_longitude: T) -> T {
+    fn local_solar_time(&self, geodetic_longitude: T) -> T
+    where
+        T: AsPrimitive<i64>,
+    {
         // 1. Calculate the day of the year (n)
         let doy = tval!(self.day_of_year(), usize);
 
@@ -434,9 +441,9 @@ where
         // 4. Equation of Time (EoT) in minutes - Spencer (1971) approximation
         // EoT = 229.18 × [0.000075 + 0.001868*cos(γ) - 0.032077*sin(γ)
         //       - 0.014615*cos(2γ) - 0.040849*sin(2γ)]
-        let eot_factor = tval!(0.000075, f64) + tval!(0.001868, f64) * gamma.clone().cos()
-            - tval!(0.032077, f64) * gamma.clone().sin()
-            - tval!(0.014615, f64) * (tval!(2, usize) * gamma.clone()).cos()
+        let eot_factor = tval!(0.000075, f64) + tval!(0.001868, f64) * gamma.cos()
+            - tval!(0.032077, f64) * gamma.sin()
+            - tval!(0.014615, f64) * (tval!(2, usize) * gamma).cos()
             - tval!(0.040849, f64) * (tval!(2, usize) * gamma).sin();
 
         let eot = tval!(229.18, f64) * eot_factor; // in minutes
@@ -463,22 +470,16 @@ where
     }
 
     /// Returns the seconds elapsed since midnight UTC.
-    fn seconds_of_day(&self) -> usize {
-        let datetime = DateTime::<Utc>::from_timestamp(self.timestamp().clone().into(), 0)
-            .expect("Invalid timestamp");
+    fn seconds_of_day(&self) -> usize
+    where
+        T: AsPrimitive<i64>,
+    {
+        let datetime =
+            DateTime::<Utc>::from_timestamp(self.timestamp().as_(), 0).expect("Invalid timestamp");
 
         datetime.num_seconds_from_midnight() as usize
     }
 
     /// Returns the timestamp of the configuration.
     fn timestamp(&self) -> T;
-}
-
-/// A trait for configurations providing velocity information.
-pub trait ConfVelocity<T, const D: usize>
-where
-    T: Scalar,
-{
-    /// Returns the velocity of the configuration.
-    fn velocity(&self) -> SVector<T, D>;
 }

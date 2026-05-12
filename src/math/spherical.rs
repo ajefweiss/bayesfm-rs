@@ -8,14 +8,19 @@ pub fn sph_evaluate<T>(coeffs: &[T], theta: T, phi: T) -> T
 where
     T: RealField,
 {
-    let l_max = { coeffs.len().isqrt() - 1 };
+    let l_max = coeffs.len().isqrt() - 1;
 
     let mut sum = T::zero();
 
-    for i in 0..l_max {
+    let x = theta.clone().sin() * phi.clone().cos();
+    let y = theta.clone().sin() * phi.clone().sin();
+    let z = theta.clone().cos();
+
+    for i in 0..=l_max {
         for j in (-(i as isize))..=(i as isize) {
-            let index = sph_get_index(i, j).unwrap();
-            sum += coeffs[index].clone() * sph_ylm(i, j)(theta.clone(), phi.clone());
+            let idx = sph_get_index(i, j).unwrap();
+
+            sum += coeffs[idx].clone() * sph_ylm(i, j)(x.clone(), y.clone(), z.clone());
         }
     }
 
@@ -74,7 +79,7 @@ macro_rules! sph_name {
 pub use sph_name;
 
 /// Returns the real spherical harmonic function of order (l, m), normalized as in geodesy.
-pub const fn sph_ylm<T>(l: usize, m: isize) -> impl Fn(T, T) -> T
+pub const fn sph_ylm<T>(l: usize, m: isize) -> impl Fn(T, T, T) -> T
 where
     T: RealField,
 {
@@ -177,922 +182,886 @@ mod sph_basis {
     use crate::tval;
     use nalgebra::RealField;
 
+    // l=0 functions
+
     /// Real spherical harmonic Y_0^0(θ, φ).
-    pub fn sph_y00<T>(_theta: T, _varphi: T) -> T
+    pub fn sph_y00<T>(_x: T, _y: T, _z: T) -> T
     where
         T: RealField,
     {
         T::one()
     }
 
+    // l=1 functions
+
     /// Real spherical harmonic Y_1^{-1}(θ, φ).
-    pub fn sph_y11s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y11s<T>(_x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
-        (tval!(3, usize)).sqrt() * theta.sin() * varphi.sin()
+        (tval!(3, usize)).sqrt() * y
     }
 
     /// Real spherical harmonic Y_1^0(θ, φ).
-    pub fn sph_y10<T>(theta: T, _varphi: T) -> T
+    pub fn sph_y10<T>(_x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
-        (tval!(3, usize)).sqrt() * theta.cos()
+        (tval!(3, usize)).sqrt() * z
     }
 
     /// Real spherical harmonic Y_1^1(θ, φ).
-    pub fn sph_y11c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y11c<T>(x: T, _y: T, _z: T) -> T
     where
         T: RealField,
     {
-        (tval!(3, usize)).sqrt() * theta.sin() * varphi.cos()
+        (tval!(3, usize)).sqrt() * x
     }
 
+    // l=2 functions
+
     /// Real spherical harmonic Y_2^{-2}(θ, φ).
-    pub fn sph_y22s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y22s<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
-        (tval!(15, usize)).sqrt() / tval!(2, usize)
-            * theta.sin().powi(2)
-            * (tval!(2, usize) * varphi).sin()
+        (tval!(15, usize)).sqrt() * x * y
     }
 
     /// Real spherical harmonic Y_2^{-1}(θ, φ).
-    pub fn sph_y21s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y21s<T>(_x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
-        (tval!(15, usize)).sqrt() / tval!(2, usize) * (tval!(2, usize) * theta).sin() * varphi.sin()
+        (tval!(15, usize)).sqrt() * y * z
     }
 
     /// Real spherical harmonic Y_2^0(θ, φ).
-    pub fn sph_y20<T>(theta: T, _varphi: T) -> T
+    pub fn sph_y20<T>(_x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
-        (tval!(5, usize)).sqrt() / tval!(2, usize)
-            * (tval!(3, usize) * theta.cos().powi(2) - T::one())
+        (tval!(5, usize) / tval!(4, usize)).sqrt() * (tval!(3, usize) * z.powi(2) - T::one())
     }
 
     /// Real spherical harmonic Y_2^1(θ, φ).
-    pub fn sph_y21c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y21c<T>(x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
-        (tval!(15, usize)).sqrt() / tval!(2, usize) * (tval!(2, usize) * theta).sin() * varphi.cos()
+        (tval!(15, usize)).sqrt() * x * z
     }
 
     /// Real spherical harmonic Y_2^2(θ, φ).
-    pub fn sph_y22c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y22c<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
-        (tval!(15, usize)).sqrt() / tval!(2, usize)
-            * theta.sin().powi(2)
-            * (tval!(2, usize) * varphi).cos()
+        // cos(phi) got introduced accidentally; should be the x^2 - y^2 factor
+        (tval!(15, usize)).sqrt() / tval!(2, usize) * (x.clone().powi(2) - y.clone().powi(2))
     }
 
+    // l=7 functions
+
     /// Real spherical harmonic Y_3^{-3}(θ, φ).
-    pub fn sph_y33s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y33s<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
         (tval!(35, usize) / tval!(8, usize)).sqrt()
-            * theta.sin().powi(3)
-            * (tval!(3, usize) * varphi).sin()
+            * y.clone()
+            * (tval!(3, usize) * x.powi(2) - y.powi(2))
     }
 
     /// Real spherical harmonic Y_3^{-2}(θ, φ).
-    pub fn sph_y32s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y32s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
-        (tval!(105, usize) / tval!(4, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * theta.cos()
-            * (tval!(2, usize) * varphi).sin()
+        (tval!(105, usize)).sqrt() * x * y * z
     }
 
     /// Real spherical harmonic Y_3^{-1}(θ, φ).
-    pub fn sph_y31s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y31s<T>(_x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
-        (tval!(21, usize) / tval!(8, usize)).sqrt()
-            * theta.clone().sin()
-            * (tval!(5, usize) * theta.cos().powi(2) - T::one())
-            * varphi.sin()
+        (tval!(21, usize) / tval!(8, usize)).sqrt() * y * (tval!(5, usize) * z.powi(2) - T::one())
     }
 
     /// Real spherical harmonic Y_3^0(θ, φ).
-    pub fn sph_y30<T>(theta: T, _varphi: T) -> T
+    pub fn sph_y30<T>(_x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(7, usize)).sqrt() / tval!(2, usize)
-            * (tval!(5, usize) * theta.clone().cos().powi(3) - tval!(3, usize) * theta.cos())
+            * (tval!(5, usize) * z.clone().powi(3) - tval!(3, usize) * z)
     }
 
     /// Real spherical harmonic Y_3^1(θ, φ).
-    pub fn sph_y31c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y31c<T>(x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
-        (tval!(21, usize) / tval!(8, usize)).sqrt()
-            * theta.clone().sin()
-            * (tval!(5, usize) * theta.cos().powi(2) - T::one())
-            * varphi.cos()
+        (tval!(21, usize) / tval!(8, usize)).sqrt() * x * (tval!(5, usize) * z.powi(2) - T::one())
     }
 
     /// Real spherical harmonic Y_3^2(θ, φ).
-    pub fn sph_y32c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y32c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
-        (tval!(105, usize) / tval!(4, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * theta.cos()
-            * (tval!(2, usize) * varphi).cos()
+        (tval!(105, usize) / tval!(4, usize)).sqrt() * (x.powi(2) - y.powi(2)) * z
     }
 
     /// Real spherical harmonic Y_3^3(θ, φ).
-    pub fn sph_y33c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y33c<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
         (tval!(35, usize) / tval!(8, usize)).sqrt()
-            * theta.sin().powi(3)
-            * (tval!(3, usize) * varphi).cos()
+            * x.clone()
+            * (x.clone().powi(2) - tval!(3, usize) * y.powi(2))
     }
 
     // l=4 functions
 
     /// Real spherical harmonic Y_4^{-4}(θ, φ).
-    pub fn sph_y44s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y44s<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
-        (tval!(315, usize) / tval!(64, usize)).sqrt()
-            * theta.sin().powi(4)
-            * (tval!(4, usize) * varphi).sin()
+        (tval!(315, usize) / tval!(4, usize)).sqrt()
+            * x.clone()
+            * y.clone()
+            * (x.clone().powi(2) - y.clone().powi(2))
     }
 
     /// Real spherical harmonic Y_4^{-3}(θ, φ).
-    pub fn sph_y43s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y43s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(315, usize) / tval!(8, usize)).sqrt()
-            * theta.clone().sin().powi(3)
-            * theta.cos()
-            * (tval!(3, usize) * varphi).sin()
+            * y.clone()
+            * z
+            * (tval!(3, usize) * x.powi(2) - y.powi(2))
     }
 
     /// Real spherical harmonic Y_4^{-2}(θ, φ).
-    pub fn sph_y42s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y42s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
-        (tval!(45, usize) / tval!(16, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * (tval!(7, usize) * theta.cos().powi(2) - T::one())
-            * (tval!(2, usize) * varphi).sin()
+        (tval!(45, usize) / tval!(4, usize)).sqrt()
+            * x
+            * y
+            * (tval!(7, usize) * z.clone().powi(2) - T::one())
     }
 
     /// Real spherical harmonic Y_4^{-1}(θ, φ).
-    pub fn sph_y41s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y41s<T>(_x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(45, usize) / tval!(8, usize)).sqrt()
-            * theta.clone().sin()
-            * (tval!(7, usize) * theta.clone().cos().powi(3) - tval!(3, usize) * theta.cos())
-            * varphi.sin()
+            * y
+            * (tval!(7, usize) * z.clone().powi(3) - tval!(3, usize) * z)
     }
 
     /// Real spherical harmonic Y_4^0(θ, φ).
-    pub fn sph_y40<T>(theta: T, _varphi: T) -> T
+    pub fn sph_y40<T>(_x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(9, usize) / tval!(64, usize)).sqrt()
-            * (tval!(35, usize) * theta.clone().cos().powi(4)
-                - tval!(30, usize) * theta.clone().cos().powi(2)
+            * (tval!(35, usize) * z.clone().powi(4) - tval!(30, usize) * z.powi(2)
                 + tval!(3, usize))
     }
 
     /// Real spherical harmonic Y_4^1(θ, φ).
-    pub fn sph_y41c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y41c<T>(x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(45, usize) / tval!(8, usize)).sqrt()
-            * theta.clone().sin()
-            * (tval!(7, usize) * theta.clone().cos().powi(3) - tval!(3, usize) * theta.cos())
-            * varphi.cos()
+            * x
+            * (tval!(7, usize) * z.clone().powi(3) - tval!(3, usize) * z)
     }
 
     /// Real spherical harmonic Y_4^2(θ, φ).
-    pub fn sph_y42c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y42c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(45, usize) / tval!(16, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * (tval!(7, usize) * theta.cos().powi(2) - T::one())
-            * (tval!(2, usize) * varphi).cos()
+            * (x.powi(2) - y.powi(2))
+            * (tval!(7, usize) * z.powi(2) - T::one())
     }
 
     /// Real spherical harmonic Y_4^3(θ, φ).
-    pub fn sph_y43c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y43c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(315, usize) / tval!(8, usize)).sqrt()
-            * theta.clone().sin().powi(3)
-            * theta.cos()
-            * (tval!(3, usize) * varphi).cos()
+            * x.clone()
+            * (x.powi(2) - tval!(3, usize) * y.powi(2))
+            * z
     }
 
     /// Real spherical harmonic Y_4^4(θ, φ).
-    pub fn sph_y44c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y44c<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
         (tval!(315, usize) / tval!(64, usize)).sqrt()
-            * theta.sin().powi(4)
-            * (tval!(4, usize) * varphi).cos()
+            * (x.clone().powi(2) * (x.clone().powi(2) - tval!(3, usize) * y.clone().powi(2))
+                - y.clone().powi(2) * (tval!(3, usize) * x.powi(2) - y.powi(2)))
     }
 
     // l=5 functions
 
-    /// Real spherical harmonic Y_5^{-5}(θ, φ).
-    pub fn sph_y55s<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_5^{-5}(x,y,z).
+    pub fn sph_y55s<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
         (tval!(693, usize) / tval!(128, usize)).sqrt()
-            * theta.sin().powi(5)
-            * (tval!(5, usize) * varphi).sin()
+            * (tval!(5, usize) * x.clone().powi(4) * y.clone()
+                - tval!(10, usize) * x.clone().powi(2) * y.clone().powi(3)
+                + y.clone().powi(5))
     }
 
-    /// Real spherical harmonic Y_5^{-4}(θ, φ).
-    pub fn sph_y54s<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_5^{-4}(x,y,z).
+    pub fn sph_y54s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(3465, usize) / tval!(64, usize)).sqrt()
-            * theta.clone().sin().powi(4)
-            * theta.cos()
-            * (tval!(4, usize) * varphi).sin()
+            * (tval!(4, usize)
+                * z.clone()
+                * x.clone()
+                * y.clone()
+                * (x.clone().powi(2) - y.clone().powi(2)))
     }
 
-    /// Real spherical harmonic Y_5^{-3}(θ, φ).
-    pub fn sph_y53s<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_5^{-3}(x,y,z).
+    pub fn sph_y53s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(385, usize) / tval!(128, usize)).sqrt()
-            * theta.clone().sin().powi(3)
-            * (tval!(9, usize) * theta.cos().powi(2) - T::one())
-            * (tval!(3, usize) * varphi).sin()
+            * ((tval!(9, usize) * z.clone().powi(2) - T::one())
+                * (tval!(3, usize) * x.clone().powi(2) * y.clone() - y.clone().powi(3)))
     }
 
-    /// Real spherical harmonic Y_5^{-2}(θ, φ).
-    pub fn sph_y52s<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_5^{-2}(x,y,z).
+    pub fn sph_y52s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(1155, usize) / tval!(16, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * (tval!(3, usize) * theta.clone().cos().powi(3) - theta.cos())
-            * (tval!(2, usize) * varphi).sin()
+            * (tval!(2, usize)
+                * x.clone()
+                * y.clone()
+                * (tval!(3, usize) * z.clone().powi(3) - z.clone()))
     }
 
-    /// Real spherical harmonic Y_5^{-1}(θ, φ).
-    pub fn sph_y51s<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_5^{-1}(x,y,z).
+    pub fn sph_y51s<T>(_x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(165, usize) / tval!(64, usize)).sqrt()
-            * theta.clone().sin()
-            * (tval!(21, usize) * theta.clone().cos().powi(4)
-                - tval!(14, usize) * theta.clone().cos().powi(2)
-                + T::one())
-            * varphi.sin()
+            * (y.clone()
+                * (tval!(21, usize) * z.clone().powi(4) - tval!(14, usize) * z.clone().powi(2)
+                    + T::one()))
     }
 
-    /// Real spherical harmonic Y_5^0(θ, φ).
-    pub fn sph_y50<T>(theta: T, _varphi: T) -> T
+    /// Real spherical harmonic Y_5^0(x,y,z).
+    pub fn sph_y50<T>(_x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(11, usize) / tval!(64, usize)).sqrt()
-            * (tval!(63, usize) * theta.clone().cos().powi(5)
-                - tval!(70, usize) * theta.clone().cos().powi(3)
-                + tval!(15, usize) * theta.cos())
+            * (tval!(63, usize) * z.clone().powi(5) - tval!(70, usize) * z.clone().powi(3)
+                + tval!(15, usize) * z.clone())
     }
 
-    /// Real spherical harmonic Y_5^1(θ, φ).
-    pub fn sph_y51c<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_5^1(x,y,z).
+    pub fn sph_y51c<T>(x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(165, usize) / tval!(64, usize)).sqrt()
-            * theta.clone().sin()
-            * (tval!(21, usize) * theta.clone().cos().powi(4)
-                - tval!(14, usize) * theta.clone().cos().powi(2)
-                + T::one())
-            * varphi.cos()
+            * (x.clone()
+                * (tval!(21, usize) * z.clone().powi(4) - tval!(14, usize) * z.clone().powi(2)
+                    + T::one()))
     }
 
-    /// Real spherical harmonic Y_5^2(θ, φ).
-    pub fn sph_y52c<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_5^2(x,y,z).
+    pub fn sph_y52c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(1155, usize) / tval!(16, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * (tval!(3, usize) * theta.clone().cos().powi(3) - theta.cos())
-            * (tval!(2, usize) * varphi).cos()
+            * ((x.clone().powi(2) - y.clone().powi(2))
+                * (tval!(3, usize) * z.clone().powi(3) - z.clone()))
     }
 
-    /// Real spherical harmonic Y_5^3(θ, φ).
-    pub fn sph_y53c<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_5^3(x,y,z).
+    pub fn sph_y53c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(385, usize) / tval!(128, usize)).sqrt()
-            * theta.clone().sin().powi(3)
-            * (tval!(9, usize) * theta.cos().powi(2) - T::one())
-            * (tval!(3, usize) * varphi).cos()
+            * ((tval!(9, usize) * z.clone().powi(2) - T::one())
+                * (x.clone().powi(3) - tval!(3, usize) * x.clone() * y.clone().powi(2)))
     }
 
-    /// Real spherical harmonic Y_5^4(θ, φ).
-    pub fn sph_y54c<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_5^4(x,y,z).
+    pub fn sph_y54c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(3465, usize) / tval!(64, usize)).sqrt()
-            * theta.clone().sin().powi(4)
-            * theta.cos()
-            * (tval!(4, usize) * varphi).cos()
+            * (z.clone()
+                * (x.clone().powi(4) - tval!(6, usize) * x.clone().powi(2) * y.clone().powi(2)
+                    + y.clone().powi(4)))
     }
 
-    /// Real spherical harmonic Y_5^5(θ, φ).
-    pub fn sph_y55c<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_5^5(x,y,z).
+    pub fn sph_y55c<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
         (tval!(693, usize) / tval!(128, usize)).sqrt()
-            * theta.sin().powi(5)
-            * (tval!(5, usize) * varphi).cos()
+            * (x.clone().powi(5) - tval!(10, usize) * x.clone().powi(3) * y.clone().powi(2)
+                + tval!(5, usize) * x.clone() * y.clone().powi(4))
     }
 
     // l=6 functions
 
-    /// Real spherical harmonic Y_6^{-6}(θ, φ).
-    pub fn sph_y66s<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^{-6}(x,y,z) (sin 6φ part)
+    pub fn sph_y66s<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
         (tval!(3003, usize) / tval!(512, usize)).sqrt()
-            * theta.sin().powi(6)
-            * (tval!(6, usize) * varphi).sin()
+            * (tval!(6, usize) * x.clone().powi(5) * y.clone()
+                - tval!(20, usize) * x.clone().powi(3) * y.clone().powi(3)
+                + tval!(6, usize) * x.clone() * y.clone().powi(5))
     }
 
-    /// Real spherical harmonic Y_6^{-5}(θ, φ).
-    pub fn sph_y65s<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^{-5}(x,y,z) (sin 5φ part)
+    pub fn sph_y65s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(9009, usize) / tval!(128, usize)).sqrt()
-            * theta.clone().sin().powi(5)
-            * theta.cos()
-            * (tval!(5, usize) * varphi).sin()
+            * z
+            * (tval!(5, usize) * x.clone().powi(4) * y.clone()
+                - tval!(10, usize) * x.clone().powi(2) * y.clone().powi(3)
+                + y.clone().powi(5))
     }
 
-    /// Real spherical harmonic Y_6^{-4}(θ, φ).
-    pub fn sph_y64s<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^{-4}(x,y,z) (sin 4φ part)
+    pub fn sph_y64s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(819, usize) / tval!(256, usize)).sqrt()
-            * theta.clone().sin().powi(4)
-            * (tval!(11, usize) * theta.cos().powi(2) - T::one())
-            * (tval!(4, usize) * varphi).sin()
+            * (tval!(11, usize) * z.clone().powi(2) - T::one())
+            * (tval!(4, usize) * x.clone().powi(3) * y.clone()
+                - tval!(4, usize) * x.clone() * y.clone().powi(3))
     }
 
-    /// Real spherical harmonic Y_6^{-3}(θ, φ).
-    pub fn sph_y63s<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^{-3}(x,y,z) (sin 3φ part)
+    pub fn sph_y63s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(2730, usize) / tval!(256, usize)).sqrt()
-            * theta.clone().sin().powi(3)
-            * (tval!(11, usize) * theta.clone().cos().powi(3) - tval!(3, usize) * theta.cos())
-            * (tval!(3, usize) * varphi).sin()
+            * (tval!(11, usize) * z.clone().powi(3) - tval!(3, usize) * z)
+            * (tval!(3, usize) * x.clone().powi(2) * y.clone() - y.clone().powi(3))
     }
 
-    /// Real spherical harmonic Y_6^{-2}(θ, φ).
-    pub fn sph_y62s<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^{-2}(x,y,z) (sin 2φ part)
+    pub fn sph_y62s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(2730, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * (tval!(33, usize) * theta.clone().cos().powi(4)
-                - tval!(18, usize) * theta.clone().cos().powi(2)
+            * (tval!(33, usize) * z.clone().powi(4) - tval!(18, usize) * z.clone().powi(2)
                 + T::one())
-            * (tval!(2, usize) * varphi).sin()
+            * (tval!(2, usize) * x.clone() * y.clone())
     }
 
-    /// Real spherical harmonic Y_6^{-1}(θ, φ).
-    pub fn sph_y61s<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^{-1}(x,y,z) (sin φ part)
+    pub fn sph_y61s<T>(_x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(273, usize) / tval!(64, usize)).sqrt()
-            * theta.clone().sin()
-            * (tval!(33, usize) * theta.clone().cos().powi(5)
-                - tval!(30, usize) * theta.clone().cos().powi(3)
-                + tval!(5, usize) * theta.cos())
-            * varphi.sin()
+            * (tval!(33, usize) * z.clone().powi(5) - tval!(30, usize) * z.clone().powi(3)
+                + tval!(5, usize) * z)
+            * y.clone()
     }
 
-    /// Real spherical harmonic Y_6^0(θ, φ).
-    pub fn sph_y60<T>(theta: T, _varphi: T) -> T
+    /// Real spherical harmonic Y_6^0(x,y,z)
+    pub fn sph_y60<T>(_: T, _: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(13, usize) / tval!(256, usize)).sqrt()
-            * (tval!(231, usize) * theta.clone().cos().powi(6)
-                - tval!(315, usize) * theta.clone().cos().powi(4)
-                + tval!(105, usize) * theta.clone().cos().powi(2)
+            * (tval!(231, usize) * z.clone().powi(6) - tval!(315, usize) * z.clone().powi(4)
+                + tval!(105, usize) * z.clone().powi(2)
                 - tval!(5, usize))
     }
 
-    /// Real spherical harmonic Y_6^1(θ, φ).
-    pub fn sph_y61c<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^1(x,y,z) (cos φ part)
+    pub fn sph_y61c<T>(x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(273, usize) / tval!(64, usize)).sqrt()
-            * theta.clone().sin()
-            * (tval!(33, usize) * theta.clone().cos().powi(5)
-                - tval!(30, usize) * theta.clone().cos().powi(3)
-                + tval!(5, usize) * theta.cos())
-            * varphi.cos()
+            * (tval!(33, usize) * z.clone().powi(5) - tval!(30, usize) * z.clone().powi(3)
+                + tval!(5, usize) * z)
+            * x.clone()
     }
 
-    /// Real spherical harmonic Y_6^2(θ, φ).
-    pub fn sph_y62c<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^2(x,y,z) (cos 2φ part)
+    pub fn sph_y62c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(2730, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * (tval!(33, usize) * theta.clone().cos().powi(4)
-                - tval!(18, usize) * theta.clone().cos().powi(2)
+            * (tval!(33, usize) * z.clone().powi(4) - tval!(18, usize) * z.clone().powi(2)
                 + T::one())
-            * (tval!(2, usize) * varphi).cos()
+            * (x.clone().powi(2) - y.clone().powi(2))
     }
 
-    /// Real spherical harmonic Y_6^3(θ, φ).
-    pub fn sph_y63c<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^3(x,y,z) (cos 3φ part)
+    pub fn sph_y63c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(2730, usize) / tval!(256, usize)).sqrt()
-            * theta.clone().sin().powi(3)
-            * (tval!(11, usize) * theta.clone().cos().powi(3) - tval!(3, usize) * theta.cos())
-            * (tval!(3, usize) * varphi).cos()
+            * (tval!(11, usize) * z.clone().powi(3) - tval!(3, usize) * z)
+            * (x.clone().powi(3) - tval!(3, usize) * x.clone() * y.clone().powi(2))
     }
 
-    /// Real spherical harmonic Y_6^4(θ, φ).
-    pub fn sph_y64c<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^4(x,y,z) (cos 4φ part)
+    pub fn sph_y64c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(819, usize) / tval!(256, usize)).sqrt()
-            * theta.clone().sin().powi(4)
-            * (tval!(11, usize) * theta.cos().powi(2) - T::one())
-            * (tval!(4, usize) * varphi).cos()
+            * (tval!(11, usize) * z.clone().powi(2) - T::one())
+            * (x.clone().powi(4) - tval!(6, usize) * x.clone().powi(2) * y.clone().powi(2)
+                + y.clone().powi(4))
     }
 
-    /// Real spherical harmonic Y_6^5(θ, φ).
-    pub fn sph_y65c<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^5(x,y,z) (cos 5φ part)
+    pub fn sph_y65c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(9009, usize) / tval!(128, usize)).sqrt()
-            * theta.clone().sin().powi(5)
-            * theta.cos()
-            * (tval!(5, usize) * varphi).cos()
+            * z
+            * (x.clone().powi(5) - tval!(10, usize) * x.clone().powi(3) * y.clone().powi(2)
+                + tval!(5, usize) * x.clone() * y.clone().powi(4))
     }
 
-    /// Real spherical harmonic Y_6^6(θ, φ).
-    pub fn sph_y66c<T>(theta: T, varphi: T) -> T
+    /// Real spherical harmonic Y_6^6(x,y,z) (cos 6φ part)
+    pub fn sph_y66c<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
         (tval!(3003, usize) / tval!(512, usize)).sqrt()
-            * theta.sin().powi(6)
-            * (tval!(6, usize) * varphi).cos()
+            * (x.clone().powi(6) - tval!(15, usize) * x.clone().powi(4) * y.clone().powi(2)
+                + tval!(15, usize) * x.clone().powi(2) * y.clone().powi(4)
+                - y.clone().powi(6))
     }
 
     // l=7 functions
 
     /// Real spherical harmonic Y_7^{-7}(θ, φ).
-    pub fn sph_y77s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y77s<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
         (tval!(6435, usize) / tval!(1024, usize)).sqrt()
-            * theta.sin().powi(7)
-            * (tval!(7, usize) * varphi).sin()
+            * (tval!(7, usize) * x.clone().powi(6) * y.clone()
+                - tval!(35, usize) * x.clone().powi(4) * y.clone().powi(3)
+                + tval!(21, usize) * x.clone().powi(2) * y.clone().powi(5)
+                - y.clone().powi(7))
     }
 
     /// Real spherical harmonic Y_7^{-6}(θ, φ).
-    pub fn sph_y76s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y76s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(45045, usize) / tval!(512, usize)).sqrt()
-            * theta.clone().sin().powi(6)
-            * theta.cos()
-            * (tval!(6, usize) * varphi).sin()
+            * z
+            * (tval!(6, usize) * x.clone().powi(5) * y.clone()
+                - tval!(20, usize) * x.clone().powi(3) * y.clone().powi(3)
+                + tval!(6, usize) * x.clone() * y.clone().powi(5))
     }
 
     /// Real spherical harmonic Y_7^{-5}(θ, φ).
-    pub fn sph_y75s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y75s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(3465, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(5)
-            * (tval!(13, usize) * theta.cos().powi(2) - T::one())
-            * (tval!(5, usize) * varphi).sin()
+            * (tval!(13, usize) * z.clone().powi(2) - T::one())
+            * (tval!(5, usize) * x.clone().powi(4) * y.clone()
+                - tval!(10, usize) * x.clone().powi(2) * y.clone().powi(3)
+                + y.clone().powi(5))
     }
 
     /// Real spherical harmonic Y_7^{-4}(θ, φ).
-    pub fn sph_y74s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y74s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(3465, usize) / tval!(256, usize)).sqrt()
-            * theta.clone().sin().powi(4)
-            * (tval!(13, usize) * theta.clone().cos().powi(3) - tval!(3, usize) * theta.cos())
-            * (tval!(4, usize) * varphi).sin()
+            * (tval!(13, usize) * z.clone().powi(3) - tval!(3, usize) * z)
+            * (tval!(4, usize) * x.clone().powi(3) * y.clone()
+                - tval!(4, usize) * x.clone() * y.clone().powi(3))
     }
 
     /// Real spherical harmonic Y_7^{-3}(θ, φ).
-    pub fn sph_y73s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y73s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(315, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(3)
-            * (tval!(143, usize) * theta.clone().cos().powi(4)
-                - tval!(66, usize) * theta.clone().cos().powi(2)
+            * (tval!(143, usize) * z.clone().powi(4) - tval!(66, usize) * z.clone().powi(2)
                 + tval!(3, usize))
-            * (tval!(3, usize) * varphi).sin()
+            * (tval!(3, usize) * x.clone().powi(2) * y.clone() - y.clone().powi(3))
     }
 
     /// Real spherical harmonic Y_7^{-2}(θ, φ).
-    pub fn sph_y72s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y72s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(315, usize) / tval!(512, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * (tval!(143, usize) * theta.clone().cos().powi(5)
-                - tval!(110, usize) * theta.clone().cos().powi(3)
-                + tval!(15, usize) * theta.cos())
-            * (tval!(2, usize) * varphi).sin()
+            * (tval!(143, usize) * z.clone().powi(5) - tval!(110, usize) * z.clone().powi(3)
+                + tval!(15, usize) * z)
+            * (tval!(2, usize) * x.clone() * y.clone())
     }
 
     /// Real spherical harmonic Y_7^{-1}(θ, φ).
-    pub fn sph_y71s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y71s<T>(_x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(105, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin()
-            * (tval!(429, usize) * theta.clone().cos().powi(6)
-                - tval!(495, usize) * theta.clone().cos().powi(4)
-                + tval!(135, usize) * theta.clone().cos().powi(2)
+            * (tval!(429, usize) * z.clone().powi(6) - tval!(495, usize) * z.clone().powi(4)
+                + tval!(135, usize) * z.clone().powi(2)
                 - tval!(5, usize))
-            * varphi.sin()
+            * y
     }
 
     /// Real spherical harmonic Y_7^0(θ, φ).
-    pub fn sph_y70<T>(theta: T, _varphi: T) -> T
+    pub fn sph_y70<T>(_x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(15, usize) / tval!(256, usize)).sqrt()
-            * (tval!(429, usize) * theta.clone().cos().powi(7)
-                - tval!(693, usize) * theta.clone().cos().powi(5)
-                + tval!(315, usize) * theta.clone().cos().powi(3)
-                - tval!(35, usize) * theta.cos())
+            * (tval!(429, usize) * z.clone().powi(7) - tval!(693, usize) * z.clone().powi(5)
+                + tval!(315, usize) * z.clone().powi(3)
+                - tval!(35, usize) * z)
     }
 
     /// Real spherical harmonic Y_7^1(θ, φ).
-    pub fn sph_y71c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y71c<T>(x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(105, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin()
-            * (tval!(429, usize) * theta.clone().cos().powi(6)
-                - tval!(495, usize) * theta.clone().cos().powi(4)
-                + tval!(135, usize) * theta.clone().cos().powi(2)
+            * (tval!(429, usize) * z.clone().powi(6) - tval!(495, usize) * z.clone().powi(4)
+                + tval!(135, usize) * z.clone().powi(2)
                 - tval!(5, usize))
-            * varphi.cos()
+            * x
     }
 
     /// Real spherical harmonic Y_7^2(θ, φ).
-    pub fn sph_y72c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y72c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(315, usize) / tval!(512, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * (tval!(143, usize) * theta.clone().cos().powi(5)
-                - tval!(110, usize) * theta.clone().cos().powi(3)
-                + tval!(15, usize) * theta.cos())
-            * (tval!(2, usize) * varphi).cos()
+            * (tval!(143, usize) * z.clone().powi(5) - tval!(110, usize) * z.clone().powi(3)
+                + tval!(15, usize) * z)
+            * (x.clone().powi(2) - y.clone().powi(2))
     }
 
     /// Real spherical harmonic Y_7^3(θ, φ).
-    pub fn sph_y73c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y73c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(315, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(3)
-            * (tval!(143, usize) * theta.clone().cos().powi(4)
-                - tval!(66, usize) * theta.clone().cos().powi(2)
+            * (tval!(143, usize) * z.clone().powi(4) - tval!(66, usize) * z.clone().powi(2)
                 + tval!(3, usize))
-            * (tval!(3, usize) * varphi).cos()
+            * (x.clone().powi(3) - tval!(3, usize) * x.clone() * y.clone().powi(2))
     }
 
     /// Real spherical harmonic Y_7^4(θ, φ).
-    pub fn sph_y74c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y74c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(3465, usize) / tval!(256, usize)).sqrt()
-            * theta.clone().sin().powi(4)
-            * (tval!(13, usize) * theta.clone().cos().powi(3) - tval!(3, usize) * theta.cos())
-            * (tval!(4, usize) * varphi).cos()
+            * (tval!(13, usize) * z.clone().powi(3) - tval!(3, usize) * z)
+            * (x.clone().powi(4) - tval!(6, usize) * x.clone().powi(2) * y.clone().powi(2)
+                + y.clone().powi(4))
     }
 
     /// Real spherical harmonic Y_7^5(θ, φ).
-    pub fn sph_y75c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y75c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(3465, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(5)
-            * (tval!(13, usize) * theta.cos().powi(2) - T::one())
-            * (tval!(5, usize) * varphi).cos()
+            * (tval!(13, usize) * z.clone().powi(2) - T::one())
+            * (x.clone().powi(5) - tval!(10, usize) * x.clone().powi(3) * y.clone().powi(2)
+                + tval!(5, usize) * x.clone() * y.clone().powi(4))
     }
 
     /// Real spherical harmonic Y_7^6(θ, φ).
-    pub fn sph_y76c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y76c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(45045, usize) / tval!(512, usize)).sqrt()
-            * theta.clone().sin().powi(6)
-            * theta.cos()
-            * (tval!(6, usize) * varphi).cos()
+            * z
+            * (x.clone().powi(6) - tval!(15, usize) * x.clone().powi(4) * y.clone().powi(2)
+                + tval!(15, usize) * x.clone().powi(2) * y.clone().powi(4)
+                - y.clone().powi(6))
     }
 
     /// Real spherical harmonic Y_7^7(θ, φ).
-    pub fn sph_y77c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y77c<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
         (tval!(6435, usize) / tval!(1024, usize)).sqrt()
-            * theta.sin().powi(7)
-            * (tval!(7, usize) * varphi).cos()
+            * (x.clone().powi(7) - tval!(21, usize) * x.clone().powi(5) * y.clone().powi(2)
+                + tval!(35, usize) * x.clone().powi(3) * y.clone().powi(4)
+                - tval!(7, usize) * x.clone() * y.clone().powi(6))
     }
 
     // l=8 functions
 
     /// Real spherical harmonic Y_8^{-8}(θ, φ).
-    pub fn sph_y88s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y88s<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
         (tval!(109395, usize) / tval!(16384, usize)).sqrt()
-            * theta.sin().powi(8)
-            * (tval!(8, usize) * varphi).sin()
+            * (tval!(8, usize) * x.clone().powi(7) * y.clone()
+                - tval!(56, usize) * x.clone().powi(5) * y.clone().powi(3)
+                + tval!(56, usize) * x.clone().powi(3) * y.clone().powi(5)
+                - tval!(8, usize) * x.clone() * y.clone().powi(7))
     }
 
     /// Real spherical harmonic Y_8^{-7}(θ, φ).
-    pub fn sph_y87s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y87s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(109395, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(7)
-            * theta.cos()
-            * (tval!(7, usize) * varphi).sin()
+            * z
+            * (tval!(7, usize) * x.clone().powi(6) * y.clone()
+                - tval!(35, usize) * x.clone().powi(4) * y.clone().powi(3)
+                + tval!(21, usize) * x.clone().powi(2) * y.clone().powi(5)
+                - y.clone().powi(7))
     }
 
     /// Real spherical harmonic Y_8^{-6}(θ, φ).
-    pub fn sph_y86s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y86s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(7293, usize) / tval!(2048, usize)).sqrt()
-            * theta.clone().sin().powi(6)
-            * (tval!(15, usize) * theta.cos().powi(2) - T::one())
-            * (tval!(6, usize) * varphi).sin()
+            * (tval!(15, usize) * z.clone().powi(2) - T::one())
+            * (tval!(6, usize) * x.clone().powi(5) * y.clone()
+                - tval!(20, usize) * x.clone().powi(3) * y.clone().powi(3)
+                + tval!(6, usize) * x.clone() * y.clone().powi(5))
     }
 
     /// Real spherical harmonic Y_8^{-5}(θ, φ).
-    pub fn sph_y85s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y85s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(17017, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(5)
-            * (tval!(15, usize) * theta.clone().cos().powi(3) - tval!(3, usize) * theta.cos())
-            * (tval!(5, usize) * varphi).sin()
+            * (tval!(15, usize) * z.clone().powi(3) - tval!(3, usize) * z)
+            * (tval!(5, usize) * x.clone().powi(4) * y.clone()
+                - tval!(10, usize) * x.clone().powi(2) * y.clone().powi(3)
+                + y.clone().powi(5))
     }
 
     /// Real spherical harmonic Y_8^{-4}(θ, φ).
-    pub fn sph_y84s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y84s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(11781, usize) / tval!(4096, usize)).sqrt()
-            * theta.clone().sin().powi(4)
-            * (tval!(65, usize) * theta.clone().cos().powi(4)
-                - tval!(26, usize) * theta.clone().cos().powi(2)
-                + T::one())
-            * (tval!(4, usize) * varphi).sin()
+            * (tval!(65, usize) * z.clone().powi(4) - tval!(26, usize) * z.powi(2) + T::one())
+            * (tval!(4, usize) * x.clone().powi(3) * y.clone()
+                - tval!(4, usize) * x.clone() * y.clone().powi(3))
     }
 
     /// Real spherical harmonic Y_8^{-3}(θ, φ).
-    pub fn sph_y83s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y83s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(19635, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(3)
-            * (tval!(39, usize) * theta.clone().cos().powi(5)
-                - tval!(26, usize) * theta.clone().cos().powi(3)
-                + tval!(3, usize) * theta.cos())
-            * (tval!(3, usize) * varphi).sin()
+            * (tval!(39, usize) * z.clone().powi(5) - tval!(26, usize) * z.clone().powi(3)
+                + tval!(3, usize) * z)
+            * (tval!(3, usize) * x.clone().powi(2) * y.clone() - y.clone().powi(3))
     }
 
     /// Real spherical harmonic Y_8^{-2}(θ, φ).
-    pub fn sph_y82s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y82s<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(5355, usize) / tval!(2048, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * (tval!(143, usize) * theta.clone().cos().powi(6)
-                - tval!(143, usize) * theta.clone().cos().powi(4)
-                + tval!(33, usize) * theta.clone().cos().powi(2)
+            * (tval!(143, usize) * z.clone().powi(6) - tval!(143, usize) * z.clone().powi(4)
+                + tval!(33, usize) * z.powi(2)
                 - T::one())
-            * (tval!(2, usize) * varphi).sin()
+            * (tval!(2, usize) * x.clone() * y.clone())
     }
 
     /// Real spherical harmonic Y_8^{-1}(θ, φ).
-    pub fn sph_y81s<T>(theta: T, varphi: T) -> T
+    pub fn sph_y81s<T>(_x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(3, usize) / tval!(32, usize))
             * (tval!(17, usize)).sqrt()
-            * theta.clone().cos()
-            * (tval!(385, usize) * theta.clone().cos().powi(2)
-                - tval!(1001, usize) * theta.clone().cos().powi(4)
-                + tval!(715, usize) * theta.clone().cos().powi(6)
+            * z.clone()
+            * (tval!(385, usize) * z.clone().powi(2) - tval!(1001, usize) * z.clone().powi(4)
+                + tval!(715, usize) * z.clone().powi(6)
                 - tval!(35, usize))
-            * theta.sin()
-            * varphi.sin()
+            * y.clone()
     }
 
     /// Real spherical harmonic Y_8^0(θ, φ).
-    pub fn sph_y80<T>(theta: T, _varphi: T) -> T
+    pub fn sph_y80<T>(_x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(17, usize) / tval!(16384, usize)).sqrt()
-            * (tval!(35, usize) - tval!(1260, usize) * theta.clone().cos().powi(2)
-                + tval!(6930, usize) * theta.clone().cos().powi(4)
-                - tval!(12012, usize) * theta.clone().cos().powi(6)
-                + tval!(6435, usize) * theta.cos().powi(8))
+            * (tval!(35, usize) - tval!(1260, usize) * z.clone().powi(2)
+                + tval!(6930, usize) * z.clone().powi(4)
+                - tval!(12012, usize) * z.clone().powi(6)
+                + tval!(6435, usize) * z.powi(8))
     }
 
     /// Real spherical harmonic Y_8^1(θ, φ).
-    pub fn sph_y81c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y81c<T>(x: T, _y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(3, usize) / tval!(32, usize))
             * (tval!(17, usize)).sqrt()
-            * theta.clone().cos()
-            * (tval!(385, usize) * theta.clone().cos().powi(2)
-                - tval!(1001, usize) * theta.clone().cos().powi(4)
-                + tval!(715, usize) * theta.clone().cos().powi(6)
+            * z.clone()
+            * (tval!(385, usize) * z.clone().powi(2) - tval!(1001, usize) * z.clone().powi(4)
+                + tval!(715, usize) * z.clone().powi(6)
                 - tval!(35, usize))
-            * theta.sin()
-            * varphi.cos()
+            * x.clone()
     }
 
     /// Real spherical harmonic Y_8^2(θ, φ).
-    pub fn sph_y82c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y82c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(5355, usize) / tval!(2048, usize)).sqrt()
-            * theta.clone().sin().powi(2)
-            * (tval!(143, usize) * theta.clone().cos().powi(6)
-                - tval!(143, usize) * theta.clone().cos().powi(4)
-                + tval!(33, usize) * theta.clone().cos().powi(2)
+            * (tval!(143, usize) * z.clone().powi(6) - tval!(143, usize) * z.clone().powi(4)
+                + tval!(33, usize) * z.powi(2)
                 - T::one())
-            * (tval!(2, usize) * varphi).cos()
+            * (x.clone().powi(2) - y.clone().powi(2))
     }
 
     /// Real spherical harmonic Y_8^3(θ, φ).
-    pub fn sph_y83c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y83c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(19635, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(3)
-            * (tval!(39, usize) * theta.clone().cos().powi(5)
-                - tval!(26, usize) * theta.clone().cos().powi(3)
-                + tval!(3, usize) * theta.cos())
-            * (tval!(3, usize) * varphi).cos()
+            * (tval!(39, usize) * z.clone().powi(5) - tval!(26, usize) * z.clone().powi(3)
+                + tval!(3, usize) * z)
+            * (x.clone().powi(3) - tval!(3, usize) * x.clone() * y.clone().powi(2))
     }
 
     /// Real spherical harmonic Y_8^4(θ, φ).
-    pub fn sph_y84c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y84c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(11781, usize) / tval!(4096, usize)).sqrt()
-            * theta.clone().sin().powi(4)
-            * (tval!(65, usize) * theta.clone().cos().powi(4)
-                - tval!(26, usize) * theta.clone().cos().powi(2)
-                + T::one())
-            * (tval!(4, usize) * varphi).cos()
+            * (tval!(65, usize) * z.clone().powi(4) - tval!(26, usize) * z.powi(2) + T::one())
+            * (x.clone().powi(4) - tval!(6, usize) * x.clone().powi(2) * y.clone().powi(2)
+                + y.clone().powi(4))
     }
 
     /// Real spherical harmonic Y_8^5(θ, φ).
-    pub fn sph_y85c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y85c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(17017, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(5)
-            * (tval!(15, usize) * theta.clone().cos().powi(3) - tval!(3, usize) * theta.cos())
-            * (tval!(5, usize) * varphi).cos()
+            * (tval!(15, usize) * z.clone().powi(3) - tval!(3, usize) * z)
+            * (x.clone().powi(5) - tval!(10, usize) * x.clone().powi(3) * y.clone().powi(2)
+                + tval!(5, usize) * x.clone() * y.clone().powi(4))
     }
 
     /// Real spherical harmonic Y_8^6(θ, φ).
-    pub fn sph_y86c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y86c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(7293, usize) / tval!(2048, usize)).sqrt()
-            * theta.clone().sin().powi(6)
-            * (tval!(15, usize) * theta.cos().powi(2) - T::one())
-            * (tval!(6, usize) * varphi).cos()
+            * (tval!(15, usize) * z.powi(2) - T::one())
+            * (x.clone().powi(6) - tval!(15, usize) * x.clone().powi(4) * y.clone().powi(2)
+                + tval!(15, usize) * x.clone().powi(2) * y.clone().powi(4)
+                - y.clone().powi(6))
     }
 
     /// Real spherical harmonic Y_8^7(θ, φ).
-    pub fn sph_y87c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y87c<T>(x: T, y: T, z: T) -> T
     where
         T: RealField,
     {
         (tval!(109395, usize) / tval!(1024, usize)).sqrt()
-            * theta.clone().sin().powi(7)
-            * theta.cos()
-            * (tval!(7, usize) * varphi).cos()
+            * z
+            * (x.clone().powi(7) - tval!(21, usize) * x.clone().powi(5) * y.clone().powi(2)
+                + tval!(35, usize) * x.clone().powi(3) * y.clone().powi(4)
+                - tval!(7, usize) * x.clone() * y.clone().powi(6))
     }
 
     /// Real spherical harmonic Y_8^8(θ, φ).
-    pub fn sph_y88c<T>(theta: T, varphi: T) -> T
+    pub fn sph_y88c<T>(x: T, y: T, _z: T) -> T
     where
         T: RealField,
     {
         (tval!(109395, usize) / tval!(16384, usize)).sqrt()
-            * theta.sin().powi(8)
-            * (tval!(8, usize) * varphi).cos()
+            * (x.clone().powi(8) - tval!(28, usize) * x.clone().powi(6) * y.clone().powi(2)
+                + tval!(70, usize) * x.clone().powi(4) * y.clone().powi(4)
+                - tval!(28, usize) * x.clone().powi(2) * y.clone().powi(6)
+                + y.clone().powi(8))
     }
 }
 
@@ -1102,7 +1071,7 @@ mod tests {
     use approx::ulps_eq;
 
     /// Compute orthogonality integral on the 2-sphere surface.
-    fn ortho_integral(f: impl Fn(f64, f64) -> f64, g: impl Fn(f64, f64) -> f64) -> f64 {
+    fn ortho_integral(f: impl Fn(f64, f64, f64) -> f64, g: impl Fn(f64, f64, f64) -> f64) -> f64 {
         let n_theta = 200;
         let n_varphi = 200;
         let d_theta = std::f64::consts::PI / n_theta as f64;
@@ -1114,7 +1083,12 @@ mod tests {
             let theta = (i as f64 + 0.5) * d_theta;
             for j in 0..n_varphi {
                 let varphi = (j as f64 + 0.5) * d_varphi;
-                integral += f(theta, varphi) * g(theta, varphi) * theta.sin() * d_theta * d_varphi;
+
+                let x = theta.sin() * varphi.cos();
+                let y = theta.sin() * varphi.sin();
+                let z = theta.cos();
+
+                integral += f(x, y, z) * g(x, y, z) * theta.sin() * d_theta * d_varphi;
             }
         }
         integral
