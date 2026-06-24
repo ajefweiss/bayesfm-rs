@@ -8,7 +8,7 @@ use crate::{
 };
 use log::debug;
 use nalgebra::{Const, RealField, SVector, SVectorView, Scalar, U1};
-use prodef::{Domain, MultivariateNormalDensity, ParticleDensity};
+use prodef::{Density, Domain, MultivariateNormalDensity, ParticleDensity};
 use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
 use rayon::prelude::*;
 use std::{iter::Sum, ops::Sub, time::Instant};
@@ -25,10 +25,13 @@ where
     StandardNormal: Distribution<T>,
 {
     /// A single iteration of an approximate Bayesian Computation particle filter algorithm using a multinormal kernel.
+    /// 
+    /// Alternatively one can specify to only use a subset of the dimensions for the kernel (blocked filter), which can be useful if some dimensions are more informative than others or if the number of parameters is large.
     pub fn abc_mvnk<EF, OF, NM>(
         &mut self,
         err_func: (&EF, T),
         obs_func: &OF,
+        opt_dims: Option<&[usize]>,
         noise: &mut NM,
     ) -> Result<T, FilterError<T>>
     where
@@ -67,6 +70,14 @@ where
             * self.settings.exploration_factor.clone();
 
         mvnk.mean = SVector::zeros();
+
+        if let Some(dims) = opt_dims {
+            for mvnk_dim in 0..mvnk.ndims() {
+                if !dims.contains(&mvnk_dim) {
+                    mvnk.set_zero(mvnk_dim);
+                } 
+            }
+        }   
 
         let ptpdf = ParticleDensity::from_vectors::<U1, Const<P>>(
             &old_params.as_view(),
@@ -165,6 +176,7 @@ where
         Ok(ess)
     }
 
+
     /// A loop of approximate Bayesian Computation particle filtering steps with various aborting criteria.
     pub fn abc_mvnk_loop<NM, EF, OF>(
         &mut self,
@@ -196,7 +208,7 @@ where
         for _ in 0..self.settings.max_iterations {
             let threshold = self.error_quantile(error_quantile).unwrap();
 
-            let result = self.abc_mvnk((err_func, threshold.clone()), obs_func, noise);
+            let result = self.abc_mvnk((err_func, threshold.clone()), obs_func, None,noise);
 
             match result {
                 Ok(new_ess) => {

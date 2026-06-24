@@ -27,14 +27,16 @@
 //! ```
 
 mod basic;
+mod wcs;
 
+pub use wcs::*;
 pub use basic::*;
-use num_traits::AsPrimitive;
 
 use crate::tval;
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use derive_more::IntoIterator;
 use nalgebra::{RealField, SVector, Scalar};
+use num_traits::AsPrimitive;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::max,
@@ -218,6 +220,29 @@ impl<OC> ConfSeries<OC> {
             + 1
     }
 
+    /// Extracts the configurations for a specific observer group.
+    ///
+    /// Returns a vector of configurations corresponding to the specified group index.
+    pub fn extract(&self, group: usize) -> Vec<OC>
+    where
+        OC: Clone,
+    {
+        self.configuration
+            .iter()
+            .zip(&self.composite_indices)
+            .filter_map(|(conf, &idx)| if idx == group { Some(conf.clone()) } else { None })
+            .collect()  
+    }
+
+    /// Extracts the indices of the configurations for a specific observer group.
+    pub fn extract_indices(&self, group: usize) -> Vec<usize> {
+        self.composite_indices
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &idx)| if idx == group { Some(i) } else { None })
+            .collect()  
+    }
+
     /// Returns the first observation configuration, if possible.
     pub fn first(&self) -> Option<&OC> {
         self.configuration.first()
@@ -336,11 +361,14 @@ impl<OC> ConfSeries<OC> {
     }
 
     /// Returns the uncombined composite_indices.
+    /// 
+    /// These indices can be used to re-sort a list or array into the same order as the combined configuration.
     pub fn uncombined_indices(&self) -> Vec<usize> {
         let count = self.count();
         let mut counts = vec![0; count];
         let mut composite_indices = Vec::with_capacity(self.len());
 
+        // Here composite_indices is populated with the index of the original observer for each configuration.
         self.composite_indices.iter().for_each(|&group| {
             composite_indices.push(counts[group]);
             counts[group] += 1;
@@ -352,6 +380,7 @@ impl<OC> ConfSeries<OC> {
             .for_each(|(edx, idx)| {
                 let mut group = self.composite_indices[edx];
 
+                // Accumulate offsets for all previous groups to get the correct index in the uncombined structure.
                 while group > 0 {
                     *idx += counts[group - 1];
                     group -= 1;

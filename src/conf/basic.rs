@@ -1,9 +1,9 @@
 use crate::conf::{ConfPosition, ConfTime};
-use nalgebra::{Const, Dim, RealField, SVector, Scalar, VectorView};
+use nalgebra::{Const, Dyn, OMatrix, OVector, RealField, SVector, Scalar};
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, fmt::Debug, ops::Sub};
 
-/// A basic vectorized configuration type, storing a timestamp and a `D`-dimensional position and velocity.
+/// A basic vectorized configuration type, storing a timestamp and a `D`-dimensional position.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct BasicConf<T, const D: usize>
 where
@@ -56,22 +56,12 @@ where
     }
 }
 
-impl<T, const D: usize> From<(T, SVector<T, D>)> for BasicConf<T, D>
+impl<T, const D: usize> From<(T, OVector<T, Const<D>>)> for BasicConf<T, D>
 where
     T: Scalar,
 {
-    fn from((timestamp, position): (T, SVector<T, D>)) -> Self {
+    fn from((timestamp, position): (T, OVector<T, Const<D>>)) -> Self {
         Self::new(timestamp, position)
-    }
-}
-
-impl<'a, T, const D: usize, RStride: Dim, CStride: Dim>
-    From<(T, &VectorView<'a, T, Const<D>, RStride, CStride>)> for BasicConf<T, D>
-where
-    T: Scalar,
-{
-    fn from((timestamp, position): (T, &VectorView<'a, T, Const<D>, RStride, CStride>)) -> Self {
-        Self::new(timestamp, position.clone_owned())
     }
 }
 
@@ -85,6 +75,87 @@ where
 }
 
 impl<'a, T, const D: usize> Sub<&'a BasicConf<T, D>> for &'a BasicConf<T, D>
+where
+    T: PartialOrd + Scalar + Sub<Output = T>,
+{
+    type Output = T;
+
+    fn sub(self, other: Self) -> Self::Output {
+        self.timestamp.clone() - other.timestamp.clone()
+    }
+}
+
+/// A basic list of vectorized configuration types, storing a timestamp and a matrix of `D`-dimensional positions.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct BasicConfList<T, const D: usize>
+where
+    T: Scalar,
+{
+    timestamp: T,
+    positions: OMatrix<T, Const<D>, Dyn>,
+}
+
+impl<T, const D: usize> BasicConfList<T, D>
+where
+    T: Scalar,
+{
+    /// Creates a new vectorized configuration.
+    pub fn new(timestamp: T, positions: OMatrix<T, Const<D>, Dyn>) -> Self {
+        Self {
+            timestamp,
+            positions,
+        }
+    }
+
+    /// Return individual [`BasicConf`]s for each position in the list, with the same timestamp.
+    pub fn split(&self) -> Vec<BasicConf<T, D>> {
+        self.positions
+            .column_iter()
+            .map(|pos| BasicConf::new(self.timestamp.clone(), pos.clone_owned()))
+            .collect()  
+    }
+}
+
+impl<T, const D: usize> ConfTime<T> for BasicConfList<T, D>
+where
+    T: RealField,
+{
+    fn timestamp(&self) -> T {
+        self.timestamp.clone()
+    }
+}
+
+impl<T, const D: usize> Default for BasicConfList<T, D>
+where
+    T: RealField,
+{
+    fn default() -> Self {
+        Self {
+            timestamp: T::zero(),
+            positions: OMatrix::zeros_generic(Const::<D>, Dyn(1)),
+        }
+    }
+}
+
+impl< T, const D: usize> From<(T, OMatrix<T, Const<D>, Dyn>)> for BasicConfList<T, D>
+where
+    T: Scalar,
+{
+    fn from((timestamp, positions): (T, OMatrix<T, Const<D>, Dyn>)) -> Self {
+        Self::new(timestamp, positions)
+    }
+}
+
+impl<T, const D: usize> PartialOrd for BasicConfList<T, D>
+where
+    T: Scalar + PartialOrd,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.timestamp.partial_cmp(&other.timestamp)
+    }
+}
+
+impl<'a, T, const D: usize> Sub<&'a BasicConfList<T, D>> for &'a BasicConfList<T, D>
 where
     T: PartialOrd + Scalar + Sub<Output = T>,
 {

@@ -19,7 +19,7 @@ where
     for i in 0..=l_max {
         for j in (-(i as isize))..=(i as isize) {
             let idx = sph_get_index(i, j).unwrap();
-
+        
             sum += coeffs[idx].clone() * sph_ylm(i, j)(x.clone(), y.clone(), z.clone());
         }
     }

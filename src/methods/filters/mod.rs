@@ -147,6 +147,11 @@ where
     M::CSST: Clone + std::fmt::Debug + Default + Send,
     StandardNormal: Distribution<T>,
 {
+    /// Return a reference to the internal [`ConfSeries`]
+    pub fn configuration(&self) -> &ConfSeries<OC> {
+        self.obs_ensbl.configuration()
+    }
+
     /// Return the stored errors.
     pub fn errors(&self) -> &[T] {
         &self.errors

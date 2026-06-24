@@ -18,13 +18,13 @@ macro_rules! py_add_model_functions {
 /// A macro that generates a function that creates a new custom filter.
 #[macro_export]
 macro_rules! py_add_model_filter {
-    ($model: ty, $name: ident, $nparams: expr, $filter_name: literal, $conf_ndim: expr, $obs_ndim: expr, $model_ndim: expr) => {
+    ($model: ty, $name: ident, $nparams: expr, $filter_name: literal, $conf_type: ident, $conf_ndim: expr, $obs_ndim: expr, $model_ndim: expr) => {
         paste::paste! {
             #[derive(Clone)]
             #[doc = "The " $filter_name " filter for the " $name " model."]
             #[pyo3::pyclass(from_py_object)]
             pub struct [< $name $filter_name Filter >] (
-                pub bayesfm::methods::filters::ParticleFilter<Float, bayesfm::conf::BasicConf<Float, $conf_ndim>, bayesfm::obs::ObsVec<Float, $obs_ndim>, $model<Float, prodef::MultivariateDensity<Float, nalgebra::Const<$nparams>>>, $model_ndim, $nparams>,
+                pub bayesfm::methods::filters::ParticleFilter<Float, bayesfm::conf::$conf_type<Float, $conf_ndim>, bayesfm::obs::ObsVec<Float, $obs_ndim>, $model<Float, prodef::MultivariateDensity<Float, nalgebra::Const<$nparams>>>, $model_ndim, $nparams>,
             );
 
             #[pyo3::pymethods]
@@ -34,8 +34,8 @@ macro_rules! py_add_model_filter {
                 pub fn [<new_ $filter_name:lower _filter>]<'py>(
                     &self,
                     py: pyo3::Python<'py>,
-                    initial: bayesfm::pytypes:: [< PyBasicConf $conf_ndim>],
-                    configuration: bayesfm::pytypes:: [< PyBasicConf $conf_ndim Series>],
+                    initial: bayesfm::pytypes:: [< Py $conf_type $conf_ndim>],
+                    configuration: bayesfm::pytypes:: [< Py $conf_type $conf_ndim Series>],
                     ref_data: numpy::PyReadonlyArray2<Float>,
                     opt_kwargs: Option<&pyo3::Bound<'_, pyo3::types::PyDict>>
                 ) -> pyo3::PyResult<[<$name $filter_name Filter>]>
@@ -111,11 +111,11 @@ macro_rules! py_add_model_filter {
 
                 #[pyo3(signature = (initial, configuration, ref_data, input, **opt_kwargs))]
                 /// Create a new filter object from a model and input ensemble.
-                pub fn new_mag_filter_with_particles<'py>(
+                pub fn [<new_ $filter_name:lower _filter_with_particles>]<'py>(
                     &self,
                     py: pyo3::Python<'py>,
-                    initial: bayesfm::pytypes:: [< PyBasicConf $conf_ndim>],
-                    configuration: bayesfm::pytypes:: [< PyBasicConf $conf_ndim Series>],
+                    initial: bayesfm::pytypes:: [< Py $conf_type $conf_ndim>],
+                    configuration: bayesfm::pytypes:: [< Py $conf_type $conf_ndim Series>],
                     ref_data: numpy::PyReadonlyArray2<Float>,
                     input: numpy::PyReadonlyArray2<Float>,
                     opt_kwargs: Option<&pyo3::Bound<'_, pyo3::types::PyDict>>,
@@ -192,7 +192,14 @@ macro_rules! py_add_model_filter {
                 pub fn [< abc_mvnk_ $filter_name:lower>]<'py>(&mut self, py: pyo3::Python<'py>, metric: String, threshold: Float, noise: &mut bayesfm::pytypes::PyObsVecNoise) -> pyo3::PyResult<Float> {
                     let error = bayesfm::py_select_error_metric!(metric, bayesfm::obs::ObsVec<Float, $obs_ndim>);
 
-                    py.detach(|| bayesfm::py_unroll_filter_errors!(self.0.abc_mvnk((&error, threshold), &$model::[< observe_ $filter_name:lower >], &mut noise.0)))
+                    py.detach(|| bayesfm::py_unroll_filter_errors!(self.0.abc_mvnk((&error, threshold), &$model::[< observe_ $filter_name:lower >], None, &mut noise.0)))
+                }
+
+                /// Blocked approximate Bayesian Computation iteration with Multivariate Normal Kernel.
+                pub fn [< abc_mvnk_block_ $filter_name:lower>]<'py>(&mut self, py: pyo3::Python<'py>, metric: String, threshold: Float, dims: Vec<usize>, noise: &mut bayesfm::pytypes::PyObsVecNoise) -> pyo3::PyResult<Float> {
+                    let error = bayesfm::py_select_error_metric!(metric, bayesfm::obs::ObsVec<Float, $obs_ndim>);
+
+                    py.detach(|| bayesfm::py_unroll_filter_errors!(self.0.abc_mvnk((&error, threshold), &$model::[< observe_ $filter_name:lower >], Some(&dims), &mut noise.0)))
                 }
 
                  /// Create a copy of the filter object.
@@ -213,7 +220,7 @@ macro_rules! py_add_model_filter {
                 }
 
                 /// Return the error quantile of the current observation ensemble.
-                pub fn error_quantile(&self, value: Float) -> Float {
+                pub fn error_quantile(&self, value: f64) -> Float {
                     self.0.error_quantile(value).unwrap()
                 }
 
@@ -265,7 +272,7 @@ macro_rules! py_add_model_filter {
                     })
                 }
 
-                 /// Return the covariance matrix of the particle filter kernel.
+                /// Return the covariance matrix of the particle filter kernel.
                 pub fn mvnk<'py>(&self, py: pyo3::Python<'py>) -> pyo3::Bound<'py, numpy::PyArray2<Float>> {
                     let mvnk: prodef::MultivariateNormalDensity<Float, nalgebra::Const<$nparams>> =
                         prodef::MultivariateNormalDensity::from_vectors::<nalgebra::U1, nalgebra::Const<$nparams>>(
@@ -303,8 +310,8 @@ macro_rules! py_add_model_filter {
                 #[pyo3(signature = (opt_configuration = None))]
                 pub fn simulate(
                     &mut self,
-                    opt_configuration: Option<bayesfm::pytypes:: [< PyBasicConf $conf_ndim Series>]>,
-                ) -> pyo3::PyResult<bayesfm::pytypes:: [<PyEnsblBasicConf $conf_ndim ObsVec $obs_ndim>]> {
+                    opt_configuration: Option<bayesfm::pytypes:: [< Py $conf_type $conf_ndim Series>]>,
+                ) -> pyo3::PyResult<bayesfm::pytypes:: [<PyEnsbl $conf_type $conf_ndim ObsVec $obs_ndim>]> {
                     let obs_ensbl = match opt_configuration {
                         Some(configuration) => {
                             bayesfm::py_unroll_filter_errors!(self.0.simulate(Some(&configuration.0), None, &$model::[< observe_ $filter_name:lower >], &mut None::<&mut bayesfm::noise::NullNoise>))
@@ -323,9 +330,9 @@ macro_rules! py_add_model_filter {
                     &mut self,
                     py: pyo3::Python<'py>,
                     metric: String,
-                    opt_configuration: Option<bayesfm::pytypes:: [< PyBasicConf $conf_ndim Series>]>,
+                    opt_configuration: Option<bayesfm::pytypes:: [< Py $conf_type $conf_ndim Series>]>,
                     opt_ref_data: Option<numpy::PyReadonlyArray2<Float>>
-                ) -> pyo3::PyResult<(bayesfm::pytypes:: [<PyEnsblBasicConf $conf_ndim ObsVec $obs_ndim>], Vec<Float>)> {
+                ) -> pyo3::PyResult<(bayesfm::pytypes:: [<PyEnsbl $conf_type $conf_ndim ObsVec $obs_ndim>], Vec<Float>)> {
                     let error = bayesfm::py_select_error_metric!(metric, bayesfm::obs::ObsVec<Float, $obs_ndim>);
 
                     let obs_ensbl = match (opt_configuration, opt_ref_data) {
@@ -346,6 +353,40 @@ macro_rules! py_add_model_filter {
                     })
                 }
 
+                /// Sequential importance resampling iteration with Multivariate Normal Kernel.
+                pub fn [< sir_mvnk_ $filter_name:lower>]<'py>(&mut self, py: pyo3::Python<'py>, covariance: numpy::PyReadonlyArray2<Float>) -> pyo3::PyResult<(Float, usize)> {
+                    let matrix = bayesfm::pytypes::array_to_matrix::<numpy::ndarray::Dim<[usize; 2]>, nalgebra::Dyn, nalgebra::Dyn>(covariance, "covariance")?;
+                    let params = matrix.nrows();
+
+                    let mvnpdf = prodef::MultivariateNormalDensity::new(matrix, prodef::Domain::new_udomain(nalgebra::Dyn(params)), None).unwrap();
+
+                    let llh = |o1: &[bayesfm::obs::ObsVec<Float, $obs_ndim>], o2: &[bayesfm::obs::ObsVec<Float, $obs_ndim>]| {
+                        let mut value = bayesfm::obs::ov_error(o1, o2, bayesfm::obs::ObsVecMetric::Valid);
+
+                        if value == 0.0 {
+                            for i in 0..3 {
+                                let veca = nalgebra::DVector::from_iterator(params, o1.iter().map(|ov| match ov[i].is_finite() {
+                                    true => ov[i],
+                                    false => 0.0,
+                                }));
+
+                                let vecb = nalgebra::DVector::from_iterator(params, o2.iter().map(|ov| match ov[i].is_finite() {
+                                    true => ov[i],
+                                    false => 0.0,
+                                }));
+
+                                let delta = vecb - veca;
+
+                                value -= mvnpdf.mahalanobis_distance_sq::<nalgebra::U1, nalgebra::Dyn>(&delta.as_view());
+                            }
+                        }
+
+                        value
+                    };
+
+                    py.detach(|| bayesfm::py_unroll_filter_errors!(self.0.sir_mvnk(&$model::[< observe_ $filter_name:lower >], &llh)))
+                }
+
                 /// Return the size of the filter object ensemble.
                 pub fn size(&self) -> usize {
                     self.0.len()
@@ -358,21 +399,48 @@ macro_rules! py_add_model_filter {
 /// A macro that generates a function to simulate an observable.
 #[macro_export]
 macro_rules! py_add_model_simulation {
-    ($model: ty, $name: ident, $nparams: expr, $observable: expr, $conf_ndim: expr, $obs_ndim: expr) => {
+    ($model: ty, $name: ident, $nparams: expr, $observable: expr, $conf_type: ident, $conf_ndim: expr, $obs_ndim: expr) => {
         paste::paste! {
             #[pyo3::pymethods]
             impl $name
             {
+                #[doc = "Compute the fisher information matrix for the" $observable "for a configuration time-series and a specific set of model parameters with a given covariance."]
+                pub fn fisher_mag<'py>(
+                    &self, 
+                    py: pyo3::Python<'py>, 
+                    initial: bayesfm::pytypes:: [< Py $conf_type $conf_ndim>],
+                    configuration: bayesfm::pytypes:: [<Py $conf_type $conf_ndim Series>],
+                    input: numpy::PyReadonlyArray2<Float>,
+                    covariance: numpy::PyReadonlyArray2<Float>
+                ) -> pyo3::PyResult<pyo3::Bound<'py, numpy::PyArray2<Float>>> {
+                    let params = bayesfm::pytypes::array_to_matrix::<numpy::ndarray::Dim<[usize; 2]>, nalgebra::Const<$nparams>, nalgebra::Dyn>(input, "input")?;
+                    let matrix = bayesfm::pytypes::array_to_matrix::<numpy::ndarray::Dim<[usize; 2]>, nalgebra::Dyn, nalgebra::Dyn>(covariance, "covariance")?;
+
+                    let mvnk = prodef::MultivariateNormalDensity::new(matrix.clone(), prodef::Domain::new_udomain(nalgebra::Dyn(matrix.nrows())), None).unwrap();
+                    
+                    let fisher = py.detach(|| {
+                        let fim = $crate::methods::fisher_information_matrix(
+                            &self.0, (&initial.0, &configuration.0), 
+                            &params.column(0),
+                            &$model::[< observe_ $observable:lower >],
+                            &mvnk);
+                            
+                        Ok::<_, pyo3::PyErr>(fim.unwrap())
+                    })?;
+
+                    Ok(fisher.transpose().to_pyarray(py))
+                }
+
                 #[doc = "Simulate the" $observable "for a configuration time-series and input array."]
                 #[pyo3(signature = (initial, configuration, input, opt_noise = None))]
                 pub fn [< simulate_ $observable >]<'py>(
                     &self,
                     py: pyo3::Python<'py>,
-                    initial: bayesfm::pytypes:: [< PyBasicConf $conf_ndim>],
-                    configuration: bayesfm::pytypes:: [<PyBasicConf $conf_ndim Series>],
+                    initial: bayesfm::pytypes:: [< Py $conf_type $conf_ndim>],
+                    configuration: bayesfm::pytypes:: [<Py $conf_type $conf_ndim Series>],
                     input: numpy::PyReadonlyArray2<Float>,
                     opt_noise: Option<bayesfm::pytypes::PyObsVecNoise>
-                ) -> pyo3::PyResult<bayesfm::pytypes:: [<PyEnsblBasicConf $conf_ndim ObsVec $obs_ndim>]> {
+                ) -> pyo3::PyResult<bayesfm::pytypes:: [<PyEnsbl $conf_type $conf_ndim ObsVec $obs_ndim>]> {
                     let matrix = bayesfm::pytypes::array_to_matrix::<numpy::ndarray::Dim<[usize; 2]>, nalgebra::Const<$nparams>, nalgebra::Dyn>(input, "input")?;
 
                     py.detach(|| {

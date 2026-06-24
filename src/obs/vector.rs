@@ -338,6 +338,15 @@ where
     }
 }
 
+impl<T, const N: usize> Sum for ObsVec<T, N>
+where
+    T: RealField,
+{
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::zeros(), |acc, next| acc + next)
+    }
+}
+
 impl<T, const N: usize> Sub for ObsVec<T, N>
 where
     T: RealField,

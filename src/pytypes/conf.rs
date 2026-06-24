@@ -1,5 +1,5 @@
 use crate::{
-    conf::{BasicConf, ConfSeries, ConfTime},
+    conf::{BasicConf, BasicConfList, ConfSeries, ConfTime},
     pytypes::{Float, array_to_matrix},
 };
 use nalgebra::{Const, Dyn, OMatrix, U1};
@@ -7,21 +7,8 @@ use numpy::{PyReadonlyArray2, ndarray::Dim};
 use paste::paste;
 use pyo3::{prelude::*, types::PyType};
 
-/// Export the PyBasicConfSeries classes.
-#[macro_export]
-macro_rules! export_py_basic_conf_series {
-    ($module: expr, $($ndim: expr),+) => {
-        $(paste::paste!{
-            $module.add_class::<[<PyBasicConf $ndim>]>()?;
-        });+
 
-        $(paste::paste!{
-            $module.add_class::<[<PyBasicConf $ndim Series>]>()?;
-        });+
-    };
-}
-
-macro_rules! impl_py_basic_conf_series {
+macro_rules! impl_py_basic_conf {
     ($ndim: expr) => {
         paste! {
             #[pyclass(from_py_object, name = BasicConf $ndim)]
@@ -98,16 +85,18 @@ macro_rules! impl_py_basic_conf_series {
                 // }
 
 
-                //     /// Return a subset of the observations given by the provided indices.
-                //     pub fn subset(&self, indices: Vec<usize>) -> PyResult<Self> {
-                //         match self {
-                //             PyObs::Obs0(obs) => Ok(PyObs::Obs0(PyObs0(obs.0.subset(&indices)))),
-                //             PyObs::Obs1(obs) => Ok(PyObs::Obs1(PyObs1(obs.0.subset(&indices)))),
-                //             PyObs::Obs2(obs) => Ok(PyObs::Obs2(PyObs2(obs.0.subset(&indices)))),
-                //             PyObs::Obs3(obs) => Ok(PyObs::Obs3(PyObs3(obs.0.subset(&indices)))),
-                //             PyObs::ObsCam(obs) => Ok(PyObs::ObsCam(PyObsCam(obs.0.subset(&indices)))),
-                //         }
-                //     }
+                /// Return a subset of the observations given by the provided indices.
+                pub fn subset(&self, indices: Vec<usize>) -> PyResult<Self> {
+                    match self.0.subset(&indices) {
+                        Some(subset) => Ok(Self(subset)),
+                        _ => Err(pyo3::exceptions::PyValueError::new_err("invalid indices")),
+                    }
+                }
+
+                /// Sort the underlying configurations.
+                pub fn sort(&mut self) {
+                    self.0.sort();
+                }
 
                 /// Return the observation timestamps as a vector.
                 pub fn timestamps(&self) -> Vec<Float> {
@@ -123,9 +112,95 @@ macro_rules! impl_py_basic_conf_series {
     };
 }
 
-impl_py_basic_conf_series!(1);
-impl_py_basic_conf_series!(2);
-impl_py_basic_conf_series!(3);
-impl_py_basic_conf_series!(4);
+macro_rules! impl_py_basic_list_conf {
+    ($ndim: expr) => {
+        paste! {
+            #[pyclass(from_py_object, name = BasicConfList $ndim)]
+            #[derive(Clone)]
+            #[doc="PyBasicConfList for n="  $ndim]
+            pub struct [<PyBasicConfList $ndim>](pub BasicConfList<Float, $ndim>);
 
-pub use export_py_basic_conf_series;
+            #[pyclass(from_py_object, name = BasicConfList $ndim Series)]
+            #[derive(Clone)]
+            #[doc="PyBasicConfListSeries for n="  $ndim]
+            pub struct [<PyBasicConfList $ndim Series>](pub ConfSeries<BasicConfList<Float, $ndim>>);
+
+            #[pymethods]
+            impl [<PyBasicConfList $ndim>] {
+                /// Create a new configuration.
+                #[new]
+                #[pyo3(signature = (timestamp, opt_position = None))]
+                pub fn new(
+                    timestamp: Float,
+                    opt_position: Option<PyReadonlyArray2<Float>>,
+                ) -> PyResult<Self> {
+                    let position = match opt_position {
+                        Some(position) => array_to_matrix::<Dim<[usize; 2]>, Const<$ndim>, Dyn>(position, "position")?,
+                        None => OMatrix::zeros_generic(Const::<$ndim>, Dyn(0)),
+                    };
+
+                    Ok([<PyBasicConfList $ndim>](
+                       BasicConfList::new(timestamp, position)
+                    ))
+                }
+            }
+
+            #[pymethods]
+            impl [<PyBasicConfList $ndim Series>] {
+                /// Combine two configurations.
+                #[classmethod]
+                pub fn combine(_cls: &Bound<PyType>, conf_a: &[<PyBasicConfList $ndim Series>], conf_b: &[<PyBasicConfList $ndim Series>]) -> PyResult<Self> {
+                    let conf = conf_a.0.clone() + conf_b.0.clone();
+
+                    Ok([<PyBasicConfList $ndim Series>](conf))
+                }
+
+                /// Return the number of observations.
+                pub fn count(&self) -> usize {
+                    self.0.count()
+                }
+
+                /// Create a new configuration.
+                #[new]
+                #[pyo3(signature = (timestamps, opt_positions = None))]
+                pub fn new(
+                    timestamps: Vec<Float>,
+                    opt_positions: Option<Vec<PyReadonlyArray2<Float>>>,
+                ) -> PyResult<Self> {
+                    let positions = match opt_positions {
+                        Some(positions) => positions.into_iter().map(|pos| array_to_matrix::<Dim<[usize; 2]>, Const<$ndim>, Dyn>(pos, "position")).collect::<PyResult<Vec<_>>>()?,
+                        None => timestamps.iter().map(|_| OMatrix::zeros_generic(Const::<$ndim>, Dyn(1))).collect(),
+                    };
+
+                    Ok([<PyBasicConfList $ndim Series>](ConfSeries::from_iter(
+                        timestamps
+                            .iter()
+                            .zip(positions)
+                            .map(|(ts, pos)| BasicConfList::new(*ts, pos))
+                    )))
+                }
+
+                /// Sort the underlying configurations.
+                pub fn sort(&mut self) {
+                    self.0.sort();
+                }
+
+                /// Return the observation timestamps as a vector.
+                pub fn timestamps(&self) -> Vec<Float> {
+                    self.0.clone().into_iter().map(|conf| conf.timestamp()).collect()
+                }
+
+                /// Return the uncombined indices.
+                pub fn uncombined_indices(&self) -> Vec<usize> {
+                    self.0.uncombined_indices()
+                }
+            }
+        }
+    };
+}
+
+impl_py_basic_conf!(1);
+impl_py_basic_conf!(2);
+impl_py_basic_conf!(3);
+
+impl_py_basic_list_conf!(4);
