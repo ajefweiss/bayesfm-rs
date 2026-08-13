@@ -20,6 +20,7 @@ pub use euclidean::*;
 pub use spherical::*;
 pub use util::*;
 
+use crate::methods::optimization::{DampedNewtonConfig, damped_newton};
 use crate::tval;
 use nalgebra::{
     Const, DMatrix, Dim, RealField, SMatrix, SVector, SVectorView, U1, U3, Vector3, VectorView,
@@ -73,6 +74,14 @@ where
     type CSST: Clone + Default + Send;
 
     /// Returns the local contravariant basis vectors.
+    ///
+    /// The default implementation computes the contravariant basis vectors using finite differences
+    /// of the `transform_internal_to_external` function with respect to each internal coordinate.
+    /// Each basis vector is computed as the derivative ∂x/∂q_i, where x is the external coordinate
+    /// and q_i is the i-th internal coordinate.
+    ///
+    /// Implementations that have analytical expressions for the basis vectors should override
+    /// this method for better accuracy and performance.
     fn contravariant_basis<CRStride, CCStride, PRStride, PCStride>(
         internal_coordinates: &VectorView<T, Const<D>, CRStride, CCStride>,
         params: &VectorView<T, Const<P>, PRStride, PCStride>,
@@ -82,7 +91,45 @@ where
         CRStride: Dim,
         CCStride: Dim,
         PRStride: Dim,
-        PCStride: Dim;
+        PCStride: Dim,
+    {
+        // Use a small finite difference step
+        let delta_h = T::from_f64(1e-6).unwrap();
+        let half_delta = delta_h.clone() / tval!(2, usize);
+
+        let mut basis_vectors = Vec::with_capacity(D);
+
+        for i in 0..D {
+            // Create perturbed coordinates: q + e_i * delta_h/2
+            let mut coord_plus = internal_coordinates.clone_owned();
+            coord_plus[i] += half_delta.clone();
+
+            // Create perturbed coordinates: q - e_i * delta_h/2
+            let mut coord_minus = internal_coordinates.clone_owned();
+            coord_minus[i] -= half_delta.clone();
+
+            // Evaluate transform at perturbed points
+            let external_plus = Self::transform_internal_to_external::<
+                U1,
+                Const<D>,
+                PRStride,
+                PCStride,
+            >(&coord_plus.as_view(), params, cs_state)?;
+            let external_minus = Self::transform_internal_to_external::<
+                U1,
+                Const<D>,
+                PRStride,
+                PCStride,
+            >(&coord_minus.as_view(), params, cs_state)?;
+
+            // Compute finite difference: ∂x/∂q_i ≈ (x(q + e_i*h/2) - x(q - e_i*h/2)) / h
+            let basis_vector = (external_plus - external_minus) / delta_h.clone();
+            basis_vectors.push(basis_vector);
+        }
+
+        // Construct matrix with basis vectors as columns
+        Some(SMatrix::from_columns(&basis_vectors))
+    }
 
     /// Returns the local contravariant basis vectors and returns the normalized vectors.
     fn contravariant_basis_normalized<CRStride, CCStride, PRStride, PCStride>(
@@ -162,7 +209,13 @@ where
             basis
                 .column_iter()
                 .zip(components.iter())
-                .map(|(basis, component)| basis * component.clone())
+                .map(|(basis, component)| {
+                    if basis[0].is_finite() {
+                        basis * component.clone()
+                    } else {
+                        SVector::zeros()
+                    }
+                })
                 .sum(),
         )
     }
@@ -191,6 +244,18 @@ where
     );
 
     /// Returns the square root of the determinant of the metric tensor.
+    ///
+    /// The default implementation computes √det(g) from the contravariant basis vectors.
+    /// For a D-dimensional coordinate system, this is computed as the absolute value of
+    /// the determinant of the matrix whose columns are the contravariant basis vectors.
+    ///
+    /// The metric tensor g_ij is related to the basis vectors e_i by:
+    /// g_ij = e_i · e_j
+    ///
+    /// Its determinant can be computed efficiently from the basis vectors.
+    ///
+    /// Implementations that have analytical expressions for √det(g) should override
+    /// this method for better accuracy and performance.
     fn sqrt_detg<CRStride, CCStride, PRStride, PCStride>(
         internal_coordinates: &VectorView<T, Const<D>, CRStride, CCStride>,
         params: &VectorView<T, Const<P>, PRStride, PCStride>,
@@ -200,7 +265,23 @@ where
         CRStride: Dim,
         CCStride: Dim,
         PRStride: Dim,
-        PCStride: Dim;
+        PCStride: Dim,
+    {
+        // Get the contravariant basis vectors
+        let basis = Self::contravariant_basis::<CRStride, CCStride, PRStride, PCStride>(
+            internal_coordinates,
+            params,
+            cs_state,
+        )?;
+
+        // Convert to a dynamic matrix to compute determinant
+        let basis_dynamic = DMatrix::from_fn(D, D, |i, j| basis[(i, j)].clone());
+
+        // Compute sqrt(det(g)) = |det(basis)|
+        // We use the LU decomposition to compute the determinant
+        let lu = basis_dynamic.lu();
+        Some(lu.determinant().abs())
+    }
 
     /// Transform internal coords `internal_coordinates` into cartesian coords `external_coordinates`.
     ///
@@ -213,6 +294,15 @@ where
     ///
     /// # Returns
     /// Internal coordinates for this geometry, or `None` if transformation fails
+    ///
+    /// The default trait implementation makes use of a numerical root finding algorithm.
+    /// Where possible, it is recommended to implement a closed form solution for the transformation.
+    ///
+    /// # Strategy
+    /// 1. Generate initial guesses distributed evenly throughout [0, 1]^D
+    /// 2. Evaluate residual for each guess and pick the best 3
+    /// 3. Use damped Newton optimization on each of the 3 best guesses
+    /// 4. Return the best converged result, or None if all fail to converge
     fn transform_external_to_internal<CRStride, CCStride, PRStride, PCStride>(
         external_coordinates: &VectorView<T, Const<D>, CRStride, CCStride>,
         params: &VectorView<T, Const<P>, PRStride, PCStride>,
@@ -222,7 +312,102 @@ where
         CRStride: Dim,
         CCStride: Dim,
         PRStride: Dim,
-        PCStride: Dim;
+        PCStride: Dim,
+    {
+        // Generate initial guesses distributed evenly throughout [0, 1]^D
+        // Number of guesses per dimension: 2^D for small D, capped at reasonable values
+        let guesses_per_dim: usize = match D {
+            1 => 11,
+            2 => 11,
+            3 => 11,
+            _ => 9,
+        };
+        let total_guesses = guesses_per_dim.pow(D as u32);
+
+        // Generate all initial guesses
+        let mut initial_guesses = Vec::with_capacity(total_guesses);
+        let mut indices = vec![0; D];
+
+        for _ in 0..total_guesses {
+            let mut guess = SVector::<T, D>::zeros();
+            for d in 0..D {
+                let frac = T::from_f64(indices[d] as f64 / (guesses_per_dim - 1) as f64).unwrap();
+                guess[d] = frac;
+            }
+            initial_guesses.push(guess);
+
+            // Increment indices (like counting in base-guesses_per_dim)
+            for idx in indices.iter_mut().take(D) {
+                *idx += 1;
+
+                if *idx < guesses_per_dim {
+                    break;
+                }
+
+                *idx = 0;
+            }
+        }
+
+        // Evaluate residual for each initial guess and collect (residual_norm_sq, guess) pairs
+        let external_coords_owned = external_coordinates.clone_owned();
+        let mut guess_residuals: Vec<(T, SVector<T, D>)> = initial_guesses
+            .into_iter()
+            .filter_map(|guess| {
+                // Compute residual: transform_internal_to_external(guess) - external_coordinates
+                let internal_ext = Self::transform_internal_to_external::<
+                    U1,
+                    Const<D>,
+                    PRStride,
+                    PCStride,
+                >(&guess.as_view(), params, cs_state)?;
+                let residual = internal_ext - &external_coords_owned;
+                let residual_norm_sq = residual.norm_squared();
+                Some((residual_norm_sq, guess))
+            })
+            .collect();
+
+        // Sort by residual norm squared and pick the best 3
+        guess_residuals.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let best_guesses: Vec<SVector<T, D>> = guess_residuals
+            .clone()
+            .into_iter()
+            .take(3)
+            .map(|(_, guess)| guess)
+            .collect();
+
+        // Configure the damped Newton optimizer
+        let config = DampedNewtonConfig::default();
+
+        // Try optimization from each of the 3 best guesses
+        let mut best_result: Option<(T, SVector<T, D>)> = None;
+
+        for initial_guess in best_guesses {
+            // Define the residual function for this optimization
+            let residual_fn = |internal: &SVector<T, D>| -> Option<SVector<T, D>> {
+                let external = Self::transform_internal_to_external::<
+                    U1,
+                    Const<D>,
+                    PRStride,
+                    PCStride,
+                >(&internal.as_view(), params, cs_state)?;
+                Some(external - &external_coords_owned)
+            };
+
+            // Run damped Newton optimization
+            if let Some(opt_result) = damped_newton(residual_fn, initial_guess, &config) {
+                // Check if this result converged and is better than previous best
+                if opt_result.converged
+                    && (best_result.is_none()
+                        || opt_result.residual_norm_sq < best_result.as_ref().unwrap().0)
+                {
+                    best_result = Some((opt_result.residual_norm_sq, opt_result.solution));
+                }
+            }
+        }
+
+        // Return the best converged result, or None if all failed to converge
+        best_result.map(|(_, solution)| solution)
+    }
 
     /// Transform external coords `external_coordinates` into the internal coords `internal_coordinates`.
     ///

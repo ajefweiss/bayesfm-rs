@@ -9,9 +9,8 @@ use itertools::Itertools;
 use log::debug;
 use nalgebra::{Const, DVector, Dyn, OMatrix, RealField, SVector, SVectorView, Scalar, U1};
 use prodef::{Density, Domain, MultivariateNormalDensity, ParticleDensity};
-use rand::{RngExt, SeedableRng};
-use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
-use rand_xoshiro::Xoshiro256PlusPlus;
+use rand::{RngExt, SeedableRng, rngs::Xoshiro256PlusPlus};
+use rand_distr::{Distribution, StandardNormal, StandardUniform, uniform::SampleUniform};
 use rayon::prelude::*;
 use std::{cmp::Ordering, iter::Sum, ops::Sub, time::Instant};
 
@@ -25,14 +24,17 @@ where
     M::FMST: Clone + std::fmt::Debug + Default + Send,
     M::CSST: Clone + std::fmt::Debug + Default + Send,
     StandardNormal: Distribution<T>,
+    StandardUniform: Distribution<T>,
 {
     /// A single iteration of an sequential importance resampling particle filter algorithm.
-    pub fn sir_mvnk<LF, OF>(
+    pub fn sir_mvnk<R, LF, OF>(
         &mut self,
         obs_func: &OF,
         llh_func: &LF,
+        rng: &mut R,
     ) -> Result<(T, usize), FilterError<T>>
     where
+        R: RngExt + SeedableRng + Send + Sync,
         LF: Fn(&[ObsVec<T, N>], &[ObsVec<T, N>]) -> T + Sync,
         OF: Fn(
                 &M,
@@ -99,13 +101,8 @@ where
             (value.is_finite(), value)
         };
 
-        let (interim_likelihood_values, iterations) = sub_pf.filter(
-            &flt_func,
-            obs_func,
-            &ptpdf,
-            &mut None::<&mut NullNoise>,
-            7901,
-        )?;
+        let (interim_likelihood_values, iterations) =
+            sub_pf.filter(&flt_func, obs_func, &ptpdf, rng, None::<&NullNoise>)?;
 
         // Offset log-likelihood values to reduce precision issues.
         let llh_max = interim_likelihood_values
@@ -146,13 +143,8 @@ where
         )
         .unwrap();
 
-        self.ensbl = EnsembleState::new_resampled(
-            &self.model,
-            self.ensbl.len(),
-            &sub_ptpdf,
-            self.random_seed + 1877,
-        )
-        .unwrap();
+        self.ensbl =
+            EnsembleState::new_resampled(&self.model, self.ensbl.len(), &sub_ptpdf, rng).unwrap();
 
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(self.random_seed);
 
@@ -188,7 +180,7 @@ where
             &mut self.ensbl,
             &mut self.obs_ensbl,
             obs_func,
-            &mut None::<&mut NullNoise>,
+            None::<(&NullNoise, &mut Xoshiro256PlusPlus)>,
         )?;
 
         debug!(
@@ -217,12 +209,14 @@ where
     }
 
     /// A loop of sequential importance re-sampling steps with various aborting criteria.
-    pub fn sir_mvnk_loop<LF, OF>(
+    pub fn sir_mvnk_loop<R, LF, OF>(
         &mut self,
         obs_func: &OF,
         llh_func: &LF,
+        rng: &mut R,
     ) -> Result<(Vec<T>, Vec<usize>), FilterError<T>>
     where
+        R: RngExt + SeedableRng + Send + Sync,
         LF: Fn(&[ObsVec<T, N>], &[ObsVec<T, N>]) -> T + Sync,
         OF: Fn(
                 &M,
@@ -237,7 +231,7 @@ where
         let mut uniques = Vec::new();
 
         for _ in 0..self.settings.max_iterations {
-            let result = self.sir_mvnk(obs_func, llh_func);
+            let result = self.sir_mvnk(obs_func, llh_func, rng);
 
             match result {
                 Ok((new_ess, new_uniques)) => {

@@ -1,18 +1,17 @@
-use crate::pytypes::Float;
+use crate::{EnsembleObservations, conf::WCSConf, obs::ObsImg, pytypes::Float};
 use numpy::ToPyArray;
 
-/// Export the PyEnsblBasicConfObsVec classes.
+/// Export the PyEnsblLocationObsVec classes.
 #[macro_export]
-macro_rules! export_py_ensbl_basicconf_obsvec {
+macro_rules! export_py_ensbl_Location_obsvec {
     ($module: expr, $(($ndim: expr, $nval: expr)),+) => {
         $(paste::paste!{
-            $module.add_class::<[<PyEnsblBasicConf $ndim ObsVec $nval>]>()?;
+            $module.add_class::<[<PyEnsblLocation $ndim ObsVec $nval>]>()?;
         });+
     };
 }
 
-
-/// Implement a PyEnsblBasicConfObsVec class for $ndim dimensions with a $nval dimensional observation vector.
+/// Implement a PyEnsblLocationObsVec class for $ndim dimensions with a $nval dimensional observation vector.
 #[macro_export]
 macro_rules! impl_py_ensbl_conf_obsvec {
     ($conf_type: ident, $ndim: expr, $nval: expr) => {
@@ -35,7 +34,7 @@ macro_rules! impl_py_ensbl_conf_obsvec {
                             column.iter().flat_map(|value| value.iter().cloned()),
                         )
                     } else {
-                        return Err(pyo3::exceptions::PyValueError::new_err("key must be smaller than ensemble size"));
+                        return Err(pyo3::exceptions::PyValueError::new_err("key must be smaller than the ensemble size"));
                     };
 
                     Ok(matrix.transpose().to_pyarray(py))
@@ -56,14 +55,52 @@ macro_rules! impl_py_ensbl_conf_obsvec {
     };
 }
 
-impl_py_ensbl_conf_obsvec!(BasicConf, 1, 1);
-impl_py_ensbl_conf_obsvec!(BasicConf, 2, 1);
-impl_py_ensbl_conf_obsvec!(BasicConf, 2, 2);
-impl_py_ensbl_conf_obsvec!(BasicConf, 3, 1);
-impl_py_ensbl_conf_obsvec!(BasicConf, 3, 2);
-impl_py_ensbl_conf_obsvec!(BasicConf, 3, 3);
+impl_py_ensbl_conf_obsvec!(Location, 1, 1);
+impl_py_ensbl_conf_obsvec!(Location, 2, 1);
+impl_py_ensbl_conf_obsvec!(Location, 2, 2);
+impl_py_ensbl_conf_obsvec!(Location, 3, 1);
+impl_py_ensbl_conf_obsvec!(Location, 3, 2);
+impl_py_ensbl_conf_obsvec!(Location, 3, 3);
+impl_py_ensbl_conf_obsvec!(Location, 4, 1);
 
-impl_py_ensbl_conf_obsvec!(BasicConfList, 4, 1);
+impl_py_ensbl_conf_obsvec!(LocationList, 4, 1);
 
-pub use {export_py_ensbl_basicconf_obsvec, impl_py_ensbl_conf_obsvec};
+/// PyEnsblVec for `WCSConf` and `ObsImg`.
+#[derive(Clone)]
+#[pyo3::pyclass(from_py_object, name = "EnsblWCSConfImg")]
+pub struct PyEnsblWCSConfImg(pub EnsembleObservations<WCSConf<Float>, ObsImg<Float>>);
 
+#[pyo3::pymethods]
+impl PyEnsblWCSConfImg {
+    /// Return the inner value of ensemble member(s) as a 2D numpy array.
+    pub fn get<'py>(
+        &self,
+        py: pyo3::Python<'py>,
+        key: usize,
+    ) -> pyo3::PyResult<Vec<pyo3::Bound<'py, numpy::PyArray2<Float>>>> {
+        let vecmatrix = if key < self.0.len() {
+            let column = self.0.output(key);
+
+            Vec::from_iter(column.iter().map(|obs| obs.0.transpose().to_pyarray(py)))
+        } else {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "key must be smaller than the ensemble size",
+            ));
+        };
+
+        Ok(vecmatrix)
+    }
+
+    /// Return the size of the ensemble.
+    pub fn size(&self) -> usize {
+        self.0.size()
+    }
+}
+
+impl From<EnsembleObservations<WCSConf<Float>, ObsImg<Float>>> for PyEnsblWCSConfImg {
+    fn from(obs_ensbl: EnsembleObservations<WCSConf<Float>, ObsImg<Float>>) -> Self {
+        Self(obs_ensbl)
+    }
+}
+
+pub use {export_py_ensbl_Location_obsvec, impl_py_ensbl_conf_obsvec};

@@ -2,5 +2,6 @@
 
 pub mod filters;
 mod fisher;
+pub mod optimization;
 
 pub use fisher::*;

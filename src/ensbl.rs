@@ -1,14 +1,18 @@
-use crate::{Model, ModelError, conf::ConfSeries, noise::Noise, obs::Obs};
+use crate::{
+    Model, ModelError,
+    conf::{ConfPosition, ConfSeries},
+    noise::Noise,
+    obs::{Obs, ObsCoordBasis},
+};
 use log::debug;
 use nalgebra::{
     Const, DMatrix, DVector, DVectorView, Dyn, Matrix, MatrixView, MatrixViewMut, OMatrix,
     RealField, SVectorView, Scalar, U1, VecStorage, VectorView,
 };
 use num_traits::Zero;
-use prodef::{Density, ParticleDensity, SamplingMode};
-use rand::SeedableRng;
+use prodef::{Density, ParticleDensity};
+use rand::{RngExt, SeedableRng};
 use rand_distr::uniform::SampleUniform;
-use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{io::Write, iter::Sum, ops::Sub, time::Instant};
@@ -101,14 +105,14 @@ where
     }
 
     /// Initialize the model parameters, and both the coordinate system and forward model states for an ensemble.
-    fn initialize_ensbl<G>(
+    fn initialize_ensbl<R, G>(
         &self,
         ensbl: &mut EnsembleState<T, Self::CSST, Self::FMST, D, P>,
         prior: G,
-        mode: &SamplingMode,
-        rseed: u64,
+        rng: &mut R,
     ) -> Result<(), ModelError<T>>
     where
+        R: RngExt + SeedableRng + Send + Sync,
         G: Density<T, Const<P>> + Sync,
     {
         let start = Instant::now();
@@ -118,26 +122,26 @@ where
             "cannot initialize an empty model ensemble"
         );
 
+        let mut rng_vec = (0..ensbl.params.ncols())
+            .map(|_| rng.fork())
+            .collect::<Vec<R>>();
+
         ensbl
             .params
             .par_column_iter_mut()
             .zip(ensbl.states.par_iter_mut())
+            .zip(rng_vec.par_iter_mut())
             .chunks(Self::RAYON_CHUNK_SIZE)
-            .enumerate()
-            .try_for_each(|(chunk_id, mut chunk)| {
-                let mut rng =
-                    Xoshiro256PlusPlus::seed_from_u64(rseed + (chunk_id * 310248241) as u64);
-
+            .try_for_each(|mut chunk| {
                 chunk
                     .iter_mut()
-                    .try_for_each(|(params, (fm_state, cs_state))| {
-                        self.initialize::<G>(
+                    .try_for_each(|((params, (fm_state, cs_state)), sub_rng)| {
+                        self.initialize::<R, G>(
                             params,
                             fm_state,
                             cs_state,
                             prior.clone(),
-                            mode,
-                            &mut rng,
+                            sub_rng,
                         )?;
 
                         Ok::<(), ModelError<T>>(())
@@ -156,29 +160,30 @@ where
     }
 
     /// Initialize the model parameters for an ensemble.
-    fn initialize_params_ensbl<G>(
+    fn initialize_params_ensbl<R, G>(
         &self,
         ensbl: &mut EnsembleState<T, Self::CSST, Self::FMST, D, P>,
         prior: G,
-        mode: &SamplingMode,
-        rseed: u64,
+        rng: &mut R,
     ) -> Result<(), ModelError<T>>
     where
+        R: RngExt + SeedableRng + Send + Sync,
         G: Density<T, Const<P>> + Sync,
     {
         let start = Instant::now();
 
+        let mut rng_vec = (0..ensbl.params.ncols())
+            .map(|_| rng.fork())
+            .collect::<Vec<R>>();
+
         ensbl
             .params
             .par_column_iter_mut()
+            .zip(rng_vec.par_iter_mut())
             .chunks(Self::RAYON_CHUNK_SIZE)
-            .enumerate()
-            .try_for_each(|(chunk_id, mut chunk)| {
-                let mut rng =
-                    Xoshiro256PlusPlus::seed_from_u64(rseed + (chunk_id * 213161503) as u64);
-
-                chunk.iter_mut().try_for_each(|params| {
-                    self.initialize_params(params, prior.clone(), mode, &mut rng)?;
+            .try_for_each(|mut chunk| {
+                chunk.iter_mut().try_for_each(|(params, sub_rng)| {
+                    self.initialize_params(params, prior.clone(), *sub_rng)?;
 
                     Ok::<(), ModelError<T>>(())
                 })?;
@@ -231,14 +236,15 @@ where {
 
     /// Perform an ensemble forward simulation and generate synthetic observables `OD` for the
     /// given spacecraft observers for a given generating function `OF` and noise model `NM`.
-    fn simulate_ensbl<OC, OD, OF, NM>(
+    fn simulate_ensbl<R, OC, OD, OF, NM>(
         &self,
         ensbl: &mut EnsembleState<T, Self::CSST, Self::FMST, D, P>,
         obs_ensbl: &mut EnsembleObservations<OC, OD>,
         obs_func: &OF,
-        opt_noise: &mut Option<&mut NM>,
+        opt_noise: Option<(&NM, &mut R)>,
     ) -> Result<(), ModelError<T>>
     where
+        R: RngExt + SeedableRng,
         OC: Scalar,
         for<'a> &'a OC: Sub<&'a OC, Output = T>,
         OD: Obs,
@@ -283,14 +289,10 @@ where {
                 Ok::<(), ModelError<T>>(())
             })?;
 
-        if let Some(noise) = opt_noise {
-            let mut rng = noise.initialize_rng(37, 23);
-
+        if let Some((noise, rng)) = opt_noise {
             obs_ensbl.ensbl_iter_mut().for_each(|(_, mut col)| {
-                noise.add_noise(&mut col, &mut rng);
+                noise.add_noise(&mut col, rng);
             });
-
-            noise.increment_random_seed()
         }
 
         debug!(
@@ -304,14 +306,15 @@ where {
 
     /// Perform an ensemble forward simulation, in parallel, and generate synthetic observables `OD` for the
     /// given spacecraft observers for a given generating function `OF` and noise model `NM`.
-    fn simulate_ensbl_par<OC, OD, OF, NM>(
+    fn simulate_ensbl_par<R, OC, OD, OF, NM>(
         &self,
         ensbl: &mut EnsembleState<T, Self::CSST, Self::FMST, D, P>,
         obs_ensbl: &mut EnsembleObservations<OC, OD>,
         obs_func: &OF,
-        opt_noise: &mut Option<&mut NM>,
+        opt_noise: Option<(&NM, &mut R)>,
     ) -> Result<(), ModelError<T>>
     where
+        R: RngExt + SeedableRng + Send + Sync,
         OC: Scalar + Sync,
         for<'a> &'a OC: Sub<&'a OC, Output = T>,
         OD: Obs,
@@ -368,21 +371,113 @@ where {
                 Ok::<(), ModelError<T>>(())
             })?;
 
-        if let Some(noise) = opt_noise {
+        if let Some((noise, rng)) = opt_noise {
+            let rng_vec = (0..obs_ensbl.len()).map(|_| rng.fork()).collect::<Vec<R>>();
+
             obs_ensbl
                 .par_ensbl_iter_mut()
+                .zip(rng_vec)
                 .chunks(Self::RAYON_CHUNK_SIZE)
-                .enumerate()
-                .for_each(|(chunk_id, mut chunk)| {
-                    let mut rng = noise.initialize_rng(29 * chunk_id as u64, 23);
-
-                    chunk.iter_mut().for_each(|(_, col)| {
-                        noise.add_noise(col, &mut rng);
+                .for_each(|mut chunk| {
+                    chunk.iter_mut().for_each(|((_, col), rng)| {
+                        noise.add_noise(col, rng);
                     });
                 });
-
-            noise.increment_random_seed()
         }
+
+        debug!(
+            "simulate_ensbl_par: {:2.1}k evaluations in {:.0}ms",
+            (obs_ensbl.len() * ensbl.len()) as f64 / 1e3,
+            start.elapsed().as_millis() as f64
+        );
+
+        Ok(())
+    }
+
+    /// Perform a forward simulation, in parallel, and return the basis vectors for the
+    /// given spacecraft observers, with configuration type `OC`.
+    fn simulate_basis_ensbl_par<OC>(
+        &self,
+        ensbl: &mut EnsembleState<T, Self::CSST, Self::FMST, D, P>,
+        obs_ensbl: &mut EnsembleObservations<OC, ObsCoordBasis<T, D>>,
+    ) -> Result<(), ModelError<T>>
+    where
+        OC: Default + ConfPosition<T, D> + Scalar + Sync,
+        for<'a> &'a OC: Sub<&'a OC, Output = T>,
+    {
+        let start = Instant::now();
+
+        let mut last_observation = obs_ensbl.initial().clone();
+
+        obs_ensbl
+            .time_iter_mut()
+            .try_for_each(|(conf, mut obs_row)| {
+                // Compute time step to next configuration.
+                let time_step = conf - &last_observation;
+                last_observation = conf.clone();
+
+                if !Self::ALLOW_NEGATIVE_TIMESTEPS && time_step < T::zero() {
+                    return Err(ModelError::Evolution(time_step));
+                } else {
+                    ensbl
+                        .params
+                        .par_column_iter()
+                        .zip(ensbl.states.par_iter_mut())
+                        .zip(obs_row.par_column_iter_mut())
+                        .chunks(Self::RAYON_CHUNK_SIZE)
+                        .try_for_each(|mut chunk| {
+                            chunk.iter_mut().try_for_each(
+                                |((params, (fm_state, cs_state)), obs)| {
+                                    self.evolve_fmst(
+                                        time_step.clone(),
+                                        params,
+                                        fm_state,
+                                        cs_state,
+                                    )?;
+
+                                    let position = conf.position();
+
+                                    let q = match Self::transform_external_to_internal::<
+                                        U1,
+                                        Const<D>,
+                                        _,
+                                        _,
+                                    >(
+                                        &position.as_view(), params, cs_state
+                                    ) {
+                                        Some(value) => value,
+                                        None => {
+                                            return Err(ModelError::Coordinates(
+                                                position.as_slice().to_vec(),
+                                            ));
+                                        }
+                                    };
+
+                                    let basis = match Self::contravariant_basis(
+                                        &q.as_view::<Const<D>, U1, U1, Const<D>>(),
+                                        params,
+                                        cs_state,
+                                    ) {
+                                        Some(vectors) => vectors,
+                                        None => {
+                                            return Err(ModelError::Coordinates(
+                                                position.as_slice().to_vec(),
+                                            ));
+                                        }
+                                    };
+
+                                    obs[(0, 0)] = ObsCoordBasis::new(q, basis);
+
+                                    Ok::<(), ModelError<T>>(())
+                                },
+                            )?;
+
+                            Ok::<(), ModelError<T>>(())
+                        })?;
+                }
+
+                Ok::<(), ModelError<T>>(())
+            })?;
 
         debug!(
             "simulate_ensbl_par: {:2.1}k evaluations in {:.0}ms",
@@ -747,17 +842,18 @@ where
     }
 
     /// Resample the model params parameters from a particle density, and re-initialize the states.
-    pub fn new_resampled<M, G>(
+    pub fn new_resampled<M, R, G>(
         model: &M,
         size: usize,
         ptpdf: &ParticleDensity<T, Const<P>, G>,
-        rseed: u64,
+        rng: &mut R,
     ) -> Result<Self, ModelError<T>>
     where
         T: SampleUniform + Sum,
         CSST: Clone + Default + Send,
         FMST: Clone + Default + Send,
         M: EnsembleModel<T, D, P, CSST = CSST, FMST = FMST> + Sync,
+        R: RngExt + SeedableRng + Send + Sync,
         G: Sync,
     {
         let start = Instant::now();
@@ -768,19 +864,20 @@ where
             None,
         );
 
+        let mut rng_vec = (0..obj.params.ncols())
+            .map(|_| rng.fork())
+            .collect::<Vec<R>>();
+
         obj.params
             .par_column_iter_mut()
             .zip(obj.states.par_iter_mut())
+            .zip(rng_vec.par_iter_mut())
             .chunks(M::RAYON_CHUNK_SIZE)
-            .enumerate()
-            .try_for_each(|(chunk_id, mut chunk)| {
-                let mut rng =
-                    Xoshiro256PlusPlus::seed_from_u64(rseed + (chunk_id * 679389209) as u64);
-
+            .try_for_each(|mut chunk| {
                 chunk
                     .iter_mut()
-                    .try_for_each(|(params, (fm_state, cs_state))| {
-                        params.set_column(0, &ptpdf.sample_particle(&mut rng));
+                    .try_for_each(|((params, (fm_state, cs_state)), sub_rng)| {
+                        params.set_column(0, &ptpdf.sample_particle(*sub_rng));
 
                         model.initialize_states(&params.as_view(), fm_state, cs_state)?;
 

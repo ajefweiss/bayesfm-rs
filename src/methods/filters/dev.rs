@@ -4,9 +4,8 @@ use crate::{
 };
 use log::debug;
 use nalgebra::{Const, RealField, SVectorView, Scalar, U1};
-use rand::{RngExt, SeedableRng};
+use rand::{RngExt, SeedableRng, rngs::Xoshiro256PlusPlus};
 use rand_distr::{Distribution, StandardNormal};
-use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 use std::{
     iter::Sum,
@@ -94,7 +93,7 @@ where
             &mut temp_ensbl,
             &mut temp_obs_ensbl,
             obs_func,
-            &mut None::<&mut NullNoise>,
+            None::<(&NullNoise, &mut Xoshiro256PlusPlus)>,
         )?;
 
         let ref_data = Vec::from(

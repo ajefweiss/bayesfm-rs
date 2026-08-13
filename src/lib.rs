@@ -11,11 +11,15 @@ pub mod obs;
 
 pub use ensbl::{EnsembleModel, EnsembleObservations, EnsembleState};
 
-use crate::{conf::ConfSeries, geometry::Geometry, obs::Obs};
+use crate::{
+    conf::{ConfPosition, ConfSeries},
+    geometry::Geometry,
+    obs::{Obs, ObsCoordBasis},
+};
 use itertools::zip_eq;
-use nalgebra::{Const, DVector, RealField, SVectorView, SVectorViewMut};
-use prodef::{Density, Domain, SamplingMode};
-use rand::RngExt;
+use nalgebra::{Const, DVector, RealField, SVectorView, SVectorViewMut, U1};
+use prodef::{Density, Domain};
+use rand::{RngExt, SeedableRng};
 use std::ops::Sub;
 use thiserror::Error;
 
@@ -102,36 +106,36 @@ where
     ) -> Result<(), ModelError<T>>;
 
     /// Initialize the model parameters, and both the coordinate system and forward model states.
-    fn initialize<G>(
+    fn initialize<R, G>(
         &self,
         params: &mut SVectorViewMut<T, P>,
         fm_state: &mut Self::FMST,
         cs_state: &mut Self::CSST,
         prior: G,
-        mode: &SamplingMode,
-        rng: &mut impl RngExt,
+        rng: &mut R,
     ) -> Result<(), ModelError<T>>
     where
+        R: RngExt + SeedableRng,
         G: Density<T, Const<P>>,
     {
-        self.initialize_params::<G>(params, prior, mode, rng)?;
+        self.initialize_params::<R, G>(params, prior, rng)?;
         self.initialize_states(&params.as_view(), fm_state, cs_state)?;
 
         Ok(())
     }
 
     /// Initialize the model parameters.
-    fn initialize_params<G>(
+    fn initialize_params<R, G>(
         &self,
         params: &mut SVectorViewMut<T, P>,
         prior: G,
-        mode: &SamplingMode,
-        rng: &mut impl RngExt,
+        rng: &mut R,
     ) -> Result<(), ModelError<T>>
     where
+        R: RngExt + SeedableRng,
         G: Density<T, Const<P>>,
     {
-        let sampled_params = prior.sample(rng, mode);
+        let sampled_params = prior.sample(rng);
 
         if let Some(param_col) = sampled_params {
             params.set_column(0, &param_col);
@@ -196,6 +200,64 @@ where
                 self.evolve_fmst(time_step, params, fm_state, cs_state)?;
 
                 *obs = obs_func(self, conf, params, fm_state, cs_state)?;
+            }
+
+            Ok::<(), ModelError<T>>(())
+        })?;
+
+        Ok(obs_ensbl_vector)
+    }
+
+    /// Perform a forward simulation and return the basis vectors for the
+    /// given spacecraft observers, with configuration type `OC`.
+    fn simulate_basis<OC>(
+        &self,
+        obs: (&OC, &ConfSeries<OC>),
+        params: &SVectorView<T, P>,
+        fm_state: &mut Self::FMST,
+        cs_state: &mut Self::CSST,
+    ) -> Result<DVector<ObsCoordBasis<T, D>>, ModelError<T>>
+    where
+        OC: Default + ConfPosition<T, D>,
+        for<'a> &'a OC: Sub<&'a OC, Output = T>,
+    {
+        let mut last_observation = obs.0;
+
+        let mut obs_ensbl_vector = DVector::zeros(obs.1.len());
+
+        zip_eq(obs.1, obs_ensbl_vector.iter_mut()).try_for_each(|(conf, obs)| {
+            // Compute time step to next observation.
+            let time_step = conf - last_observation;
+            last_observation = conf;
+
+            if !Self::ALLOW_NEGATIVE_TIMESTEPS && time_step < T::zero() {
+                return Err(ModelError::Evolution(time_step));
+            } else {
+                self.evolve_fmst(time_step, params, fm_state, cs_state)?;
+
+                let position = conf.position();
+
+                let q = match Self::transform_external_to_internal::<U1, Const<D>, _, _>(
+                    &position.as_view(),
+                    params,
+                    cs_state,
+                ) {
+                    Some(value) => value,
+                    None => {
+                        return Err(ModelError::Coordinates(position.as_slice().to_vec()));
+                    }
+                };
+
+                let basis = match Self::contravariant_basis(
+                    &q.as_view::<Const<D>, U1, U1, Const<D>>(),
+                    params,
+                    cs_state,
+                ) {
+                    Some(vectors) => vectors,
+                    None => return Err(ModelError::Coordinates(position.as_slice().to_vec())),
+                };
+
+                *obs = ObsCoordBasis::new(q, basis);
             }
 
             Ok::<(), ModelError<T>>(())

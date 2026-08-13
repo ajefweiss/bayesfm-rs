@@ -26,16 +26,17 @@
 //! assert_eq!(uncombined.len(), 2); // 2 ConfSeries objects
 //! ```
 
-mod basic;
+mod loc;
 mod wcs;
 
+use ::wcs::{ImgXY, LonLat, WCS, WCSParams};
+pub use loc::*;
 pub use wcs::*;
-pub use basic::*;
 
 use crate::tval;
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use derive_more::IntoIterator;
-use nalgebra::{RealField, SVector, Scalar};
+use nalgebra::{RealField, SMatrix, SVector, Scalar, Unit, UnitQuaternion, Vector3};
 use num_traits::AsPrimitive;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -230,8 +231,14 @@ impl<OC> ConfSeries<OC> {
         self.configuration
             .iter()
             .zip(&self.composite_indices)
-            .filter_map(|(conf, &idx)| if idx == group { Some(conf.clone()) } else { None })
-            .collect()  
+            .filter_map(|(conf, &idx)| {
+                if idx == group {
+                    Some(conf.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Extracts the indices of the configurations for a specific observer group.
@@ -240,7 +247,7 @@ impl<OC> ConfSeries<OC> {
             .iter()
             .enumerate()
             .filter_map(|(i, &idx)| if idx == group { Some(i) } else { None })
-            .collect()  
+            .collect()
     }
 
     /// Returns the first observation configuration, if possible.
@@ -361,7 +368,7 @@ impl<OC> ConfSeries<OC> {
     }
 
     /// Returns the uncombined composite_indices.
-    /// 
+    ///
     /// These indices can be used to re-sort a list or array into the same order as the combined configuration.
     pub fn uncombined_indices(&self) -> Vec<usize> {
         let count = self.count();
@@ -429,6 +436,96 @@ impl<OC> FromIterator<OC> for ConfSeries<OC> {
             composite_indices: vec![0; length],
         }
     }
+}
+
+/// A trait for configurations providing camera information.
+pub trait ConfCamera<T>: ConfPosition<T, 3>
+where
+    T: RealField,
+{
+    /// Returns a matrix consisting of corner vectors that define the FOV of the observation camera.
+    /// Note: These calculations do not take into account the position of the observer (i.e. assumes a fixed position at the origin).
+    fn fovs(&self) -> SMatrix<T, 3, 4> {
+        let wcs = WCS::new(self.wcs()).unwrap();
+        let position = &self.position();
+
+        let image_res_x = wcs.img_dimensions()[0] as f64;
+        let image_res_y = wcs.img_dimensions()[1] as f64;
+
+        let mut x0 = wcs.unproj_lonlat(&ImgXY::new(0.0, 0.0)).unwrap();
+        let mut x1 = wcs.unproj_lonlat(&ImgXY::new(image_res_x, 0.0)).unwrap();
+        let mut x2 = wcs.unproj_lonlat(&ImgXY::new(0.0, image_res_y)).unwrap();
+        let mut x3 = wcs
+            .unproj_lonlat(&ImgXY::new(image_res_x, image_res_y))
+            .unwrap();
+
+        // Correct for left-handedness
+        x0 = LonLat::new(f64::two_pi() - x0.lon(), x0.lat());
+        x1 = LonLat::new(f64::two_pi() - x1.lon(), x1.lat());
+        x2 = LonLat::new(f64::two_pi() - x2.lon(), x2.lat());
+        x3 = LonLat::new(f64::two_pi() - x3.lon(), x3.lat());
+
+        // Project external coordinates onto the celestian sphere, as seen by the observed.
+        // Build a quaternion to de-rotate the external coordinates into a system with lon/lat.
+        let ux = Vector3::<T>::x_axis();
+
+        let rot_axis = if (position.normalize().clone() - ux.clone().into_inner()).norm()
+            < T::from_f64(5e-2).unwrap()
+        {
+            Vector3::<T>::z_axis()
+        } else {
+            Unit::new_normalize(ux.clone().cross(position))
+        };
+
+        let rot_angle = (ux.dot(&-position) / position.norm()).acos();
+
+        let derot_q = UnitQuaternion::from_axis_angle(&rot_axis, rot_angle).conjugate();
+
+        let derot_x0 = {
+            let xyz = x0.to_xyz();
+
+            derot_q.transform_vector(&Vector3::from([
+                tval!(xyz.x(), f64),
+                tval!(xyz.y(), f64),
+                tval!(xyz.z(), f64),
+            ]))
+        };
+
+        let derot_x1 = {
+            let xyz = x1.to_xyz();
+
+            derot_q.transform_vector(&Vector3::from([
+                tval!(xyz.x(), f64),
+                tval!(xyz.y(), f64),
+                tval!(xyz.z(), f64),
+            ]))
+        };
+
+        let derot_x2 = {
+            let xyz = x2.to_xyz();
+
+            derot_q.transform_vector(&Vector3::from([
+                tval!(xyz.x(), f64),
+                tval!(xyz.y(), f64),
+                tval!(xyz.z(), f64),
+            ]))
+        };
+
+        let derot_x3 = {
+            let xyz = x3.to_xyz();
+
+            derot_q.transform_vector(&Vector3::from([
+                tval!(xyz.x(), f64),
+                tval!(xyz.y(), f64),
+                tval!(xyz.z(), f64),
+            ]))
+        };
+
+        SMatrix::from_columns(&[derot_x0, derot_x1, derot_x2, derot_x3])
+    }
+
+    /// Returns the WCS parameters for the camera configuration.
+    fn wcs(&self) -> &WCSParams;
 }
 
 /// A trait for configurations providing positional information.

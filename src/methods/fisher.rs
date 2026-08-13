@@ -8,7 +8,8 @@ use nalgebra::{
 };
 use num_traits::Float;
 use prodef::MultivariateNormalDensity;
-use rand_distr::{Distribution, StandardNormal};
+use rand::rngs::Xoshiro256PlusPlus;
+use rand_distr::{Distribution, StandardUniform};
 use std::{iter::Sum, ops::Sub};
 
 /// Generic method that computes the fisher information matrix (FIM) for an observation function that
@@ -38,7 +39,7 @@ where
     for<'a> &'a OC: Sub<&'a OC, Output = T>,
     OF: Fn(&M, &OC, &SVectorView<T, P>, &M::FMST, &M::CSST) -> Result<ObsVec<T, N>, ModelError<T>>
         + Sync,
-    StandardNormal: Distribution<T>,
+    StandardUniform: Distribution<T>,
 {
     let mut result = SMatrix::<T, P, P>::zeros();
 
@@ -83,14 +84,14 @@ where
         &mut pos,
         &mut obs_ensbl_pos,
         obs_func,
-        &mut None::<&mut NullNoise>,
+        None::<(&NullNoise, &mut Xoshiro256PlusPlus)>,
     )?;
 
     model.simulate_ensbl(
         &mut neg,
         &mut obs_ensbl_neg,
         obs_func,
-        &mut None::<&mut NullNoise>,
+        None::<(&NullNoise, &mut Xoshiro256PlusPlus)>,
     )?;
 
     let dmus = (0..P)

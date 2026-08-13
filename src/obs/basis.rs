@@ -40,7 +40,7 @@ where
 
 impl<T, const D: usize> ObsCoordBasis<T, D>
 where
-    T:  RealField,
+    T: RealField,
 {
     /// Returns the basis vector matrix (D × D, column-major).
     ///
@@ -55,6 +55,11 @@ where
     /// These are the coordinates returned by `Geometry::internal()` transformation.
     pub fn coordinates(&self) -> &SVector<T, D> {
         &self.coordinates
+    }
+
+    /// Creates a new `ObsCoordBasis` from coordinates and basis matrix.
+    pub fn new(coordinates: SVector<T, D>, basis: SMatrix<T, D, D>) -> Self {
+        Self { coordinates, basis }
     }
 
     /// Creates a new `ObsCoordBasis` from coordinates and basis vectors.
@@ -76,10 +81,10 @@ where
     /// let e2: SVector<f64, 3> = SVector::from_row_slice(&[0.0, 1.0, 0.0]);
     /// let e3: SVector<f64, 3> = SVector::from_row_slice(&[0.0, 0.0, 1.0]);
     ///
-    /// let obs = ObsCoordBasis::new(coords, &[e1, e2, e3]);
+    /// let obs = ObsCoordBasis::from_vectors(coords, &[e1, e2, e3]);
     /// assert_eq!(obs.coordinates(), &coords);
     /// ```
-    pub fn new(coordinates: SVector<T, D>, vectors: &[SVector<T, D>]) -> Self {
+    pub fn from_vectors(coordinates: SVector<T, D>, vectors: &[SVector<T, D>]) -> Self {
         Self {
             coordinates,
             basis: Matrix::from_columns(vectors),
@@ -89,7 +94,7 @@ where
 
 impl<T> ObsCoordBasis<T, 1>
 where
-    T:  RealField,
+    T: RealField,
 {
     /// Returns the first (and only) basis vector (column 0).
     ///
@@ -102,7 +107,7 @@ where
 
 impl<T> ObsCoordBasis<T, 2>
 where
-    T:  RealField,
+    T: RealField,
 {
     /// Returns the first basis vector (column 0).
     ///
@@ -115,7 +120,7 @@ where
 
 impl<T> ObsCoordBasis<T, 3>
 where
-    T:  RealField,
+    T: RealField,
 {
     /// Returns the first basis vector (column 0).
     ///
@@ -134,7 +139,7 @@ where
     /// let e2 = SVector::from_row_slice(&[0.0, 1.0, 0.0]);
     /// let e3 = SVector::from_row_slice(&[0.0, 0.0, 1.0]);
     ///
-    /// let obs = ObsCoordBasis::<f64, 3>::new(coords, &[e1, e2, e3]);
+    /// let obs = ObsCoordBasis::<f64, 3>::from_vectors(coords, &[e1, e2, e3]);
     /// assert_eq!(obs.eps_mu(), e1);
     /// ```
     pub fn eps_mu<'a>(&'a self) -> SVectorView<'a, T, 3> {
@@ -158,7 +163,7 @@ where
     /// let e2 = SVector::from_row_slice(&[0.0, 1.0, 0.0]);
     /// let e3 = SVector::from_row_slice(&[0.0, 0.0, 1.0]);
     ///
-    /// let obs = ObsCoordBasis::<f64, 3>::new(coords, &[e1, e2, e3]);
+    /// let obs = ObsCoordBasis::<f64, 3>::from_vectors(coords, &[e1, e2, e3]);
     /// assert_eq!(obs.eps_nu(), e2);
     /// ```
     pub fn eps_nu<'a>(&'a self) -> SVectorView<'a, T, 3> {
@@ -183,7 +188,7 @@ where
     /// let e2 = SVector::from_row_slice(&[0.0, 1.0, 0.0]);
     /// let e3 = SVector::from_row_slice(&[0.0, 0.0, 1.0]);
     ///
-    /// let obs = ObsCoordBasis::<f64, 3>::new(coords, &[e1, e2, e3]);
+    /// let obs = ObsCoordBasis::<f64, 3>::from_vectors(coords, &[e1, e2, e3]);
     /// assert_eq!(obs.eps_s(), e3);
     /// ```
     pub fn eps_s<'a>(&'a self) -> SVectorView<'a, T, 3> {
@@ -193,7 +198,7 @@ where
 
 impl<T, const D: usize> Add for ObsCoordBasis<T, D>
 where
-    T:  RealField,
+    T: RealField,
 {
     type Output = Self;
 
@@ -207,7 +212,7 @@ where
 
 impl<T, const D: usize> Zero for ObsCoordBasis<T, D>
 where
-    T:  RealField,
+    T: RealField,
 {
     fn is_zero(&self) -> bool {
         self.coordinates.is_zero() && self.basis.iter().all(|e| e.is_zero())

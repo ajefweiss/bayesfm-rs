@@ -19,7 +19,8 @@ type Float = f64;
 
 use nalgebra::{DefaultAllocator, Dim, Dyn, OMatrix, allocator::Allocator};
 use numpy::{PyReadonlyArray, ndarray::Dimension};
-use pyo3::PyResult;
+use pyo3::{PyResult, pyclass, pymethods};
+use rand::{SeedableRng, rngs::Xoshiro256PlusPlus};
 
 /// Convert a PyArray to nalgebra [`OMatrix`].
 ///
@@ -40,5 +41,22 @@ where
             "Conversion of a numpy array \"{}\" to nalgebra matrix failed",
             name
         ))),
+    }
+}
+
+/// A random number generator for use in Python.
+#[derive(Clone)]
+#[pyclass(from_py_object, name = "Xoshiro256PlusPlus")]
+pub struct PyXoshiro256PlusPlus(pub Xoshiro256PlusPlus);
+
+#[pymethods]
+impl PyXoshiro256PlusPlus {
+    #[new]
+    #[pyo3(signature = (opt_seed))]
+    #[doc = "Initializes a random number generator"]
+    pub fn new(opt_seed: Option<u64>) -> PyResult<Self> {
+        Ok(Self(Xoshiro256PlusPlus::seed_from_u64(
+            opt_seed.unwrap_or(42),
+        )))
     }
 }

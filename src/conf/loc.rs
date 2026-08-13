@@ -5,7 +5,7 @@ use std::{cmp::Ordering, fmt::Debug, ops::Sub};
 
 /// A basic vectorized configuration type, storing a timestamp and a `D`-dimensional position.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct BasicConf<T, const D: usize>
+pub struct Location<T, const D: usize>
 where
     T: Scalar,
 {
@@ -13,7 +13,7 @@ where
     position: SVector<T, D>,
 }
 
-impl<T, const D: usize> BasicConf<T, D>
+impl<T, const D: usize> Location<T, D>
 where
     T: Scalar,
 {
@@ -26,7 +26,7 @@ where
     }
 }
 
-impl<T, const D: usize> ConfPosition<T, D> for BasicConf<T, D>
+impl<T, const D: usize> ConfPosition<T, D> for Location<T, D>
 where
     T: Scalar,
 {
@@ -35,7 +35,7 @@ where
     }
 }
 
-impl<T, const D: usize> ConfTime<T> for BasicConf<T, D>
+impl<T, const D: usize> ConfTime<T> for Location<T, D>
 where
     T: RealField,
 {
@@ -44,7 +44,7 @@ where
     }
 }
 
-impl<T, const D: usize> Default for BasicConf<T, D>
+impl<T, const D: usize> Default for Location<T, D>
 where
     T: RealField,
 {
@@ -56,7 +56,7 @@ where
     }
 }
 
-impl<T, const D: usize> From<(T, OVector<T, Const<D>>)> for BasicConf<T, D>
+impl<T, const D: usize> From<(T, OVector<T, Const<D>>)> for Location<T, D>
 where
     T: Scalar,
 {
@@ -65,7 +65,7 @@ where
     }
 }
 
-impl<T, const D: usize> PartialOrd for BasicConf<T, D>
+impl<T, const D: usize> PartialOrd for Location<T, D>
 where
     T: Scalar + PartialOrd,
 {
@@ -74,7 +74,7 @@ where
     }
 }
 
-impl<'a, T, const D: usize> Sub<&'a BasicConf<T, D>> for &'a BasicConf<T, D>
+impl<'a, T, const D: usize> Sub<&'a Location<T, D>> for &'a Location<T, D>
 where
     T: PartialOrd + Scalar + Sub<Output = T>,
 {
@@ -87,7 +87,7 @@ where
 
 /// A basic list of vectorized configuration types, storing a timestamp and a matrix of `D`-dimensional positions.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct BasicConfList<T, const D: usize>
+pub struct LocationList<T, const D: usize>
 where
     T: Scalar,
 {
@@ -95,7 +95,7 @@ where
     positions: OMatrix<T, Const<D>, Dyn>,
 }
 
-impl<T, const D: usize> BasicConfList<T, D>
+impl<T, const D: usize> LocationList<T, D>
 where
     T: Scalar,
 {
@@ -107,16 +107,16 @@ where
         }
     }
 
-    /// Return individual [`BasicConf`]s for each position in the list, with the same timestamp.
-    pub fn split(&self) -> Vec<BasicConf<T, D>> {
+    /// Return individual [`Location`]s for each position in the list, with the same timestamp.
+    pub fn split(&self) -> Vec<Location<T, D>> {
         self.positions
             .column_iter()
-            .map(|pos| BasicConf::new(self.timestamp.clone(), pos.clone_owned()))
-            .collect()  
+            .map(|pos| Location::new(self.timestamp.clone(), pos.clone_owned()))
+            .collect()
     }
 }
 
-impl<T, const D: usize> ConfTime<T> for BasicConfList<T, D>
+impl<T, const D: usize> ConfTime<T> for LocationList<T, D>
 where
     T: RealField,
 {
@@ -125,7 +125,7 @@ where
     }
 }
 
-impl<T, const D: usize> Default for BasicConfList<T, D>
+impl<T, const D: usize> Default for LocationList<T, D>
 where
     T: RealField,
 {
@@ -137,7 +137,7 @@ where
     }
 }
 
-impl< T, const D: usize> From<(T, OMatrix<T, Const<D>, Dyn>)> for BasicConfList<T, D>
+impl<T, const D: usize> From<(T, OMatrix<T, Const<D>, Dyn>)> for LocationList<T, D>
 where
     T: Scalar,
 {
@@ -146,7 +146,7 @@ where
     }
 }
 
-impl<T, const D: usize> PartialOrd for BasicConfList<T, D>
+impl<T, const D: usize> PartialOrd for LocationList<T, D>
 where
     T: Scalar + PartialOrd,
 {
@@ -155,7 +155,7 @@ where
     }
 }
 
-impl<'a, T, const D: usize> Sub<&'a BasicConfList<T, D>> for &'a BasicConfList<T, D>
+impl<'a, T, const D: usize> Sub<&'a LocationList<T, D>> for &'a LocationList<T, D>
 where
     T: PartialOrd + Scalar + Sub<Output = T>,
 {
@@ -180,11 +180,11 @@ mod tests {
     #[test]
     fn test_conf_combine_and_uncombine() {
         let conf1 = ConfSeries::from_iter([
-            BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
-            BasicConf::from((0.1, Vector3::new(2.0, 0.0, 0.0))),
+            Location::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
+            Location::from((0.1, Vector3::new(2.0, 0.0, 0.0))),
         ]);
 
-        let conf2 = ConfSeries::from_iter([BasicConf::from((0.05, Vector3::new(1.5, 0.0, 0.0)))]);
+        let conf2 = ConfSeries::from_iter([Location::from((0.05, Vector3::new(1.5, 0.0, 0.0)))]);
 
         // After combining, total length should be 3
         let combined = conf1.clone() + conf2.clone();
@@ -243,10 +243,10 @@ mod tests {
     #[test]
     fn test_conf_subset() {
         let conf = ConfSeries::from_iter([
-            BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
-            BasicConf::from((1.0, Vector3::new(2.0, 0.0, 0.0))),
-            BasicConf::from((0.5, Vector3::new(1.5, 0.0, 0.0))),
-            BasicConf::from((2.0, Vector3::new(3.0, 0.0, 0.0))),
+            Location::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
+            Location::from((1.0, Vector3::new(2.0, 0.0, 0.0))),
+            Location::from((0.5, Vector3::new(1.5, 0.0, 0.0))),
+            Location::from((2.0, Vector3::new(3.0, 0.0, 0.0))),
         ]);
 
         // Extract indices 0, 2, 3 (subset of 4 items)
@@ -289,9 +289,9 @@ mod tests {
     #[test]
     fn test_conf_subset_out_of_bounds() {
         let conf = ConfSeries::from_iter([
-            BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
-            BasicConf::from((1.0, Vector3::new(2.0, 0.0, 0.0))),
-            BasicConf::from((0.5, Vector3::new(1.5, 0.0, 0.0))),
+            Location::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
+            Location::from((1.0, Vector3::new(2.0, 0.0, 0.0))),
+            Location::from((0.5, Vector3::new(1.5, 0.0, 0.0))),
         ]);
 
         // Try to access index 5 when only 0-2 exist
@@ -305,7 +305,7 @@ mod tests {
     /// Tests that subset() returns None for single out-of-bounds index.
     #[test]
     fn test_conf_subset_single_out_of_bounds() {
-        let conf = ConfSeries::from_iter([BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0)))]);
+        let conf = ConfSeries::from_iter([Location::from((0.0, Vector3::new(1.0, 0.0, 0.0)))]);
 
         // Try to access index 10 when only 0 exists
         let result = conf.subset(&[10]);
@@ -323,9 +323,9 @@ mod tests {
     fn test_conf_count() {
         // Single observer with 3 configurations
         let single_obs = ConfSeries::from_iter([
-            BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
-            BasicConf::from((1.0, Vector3::new(2.0, 0.0, 0.0))),
-            BasicConf::from((0.5, Vector3::new(1.5, 0.0, 0.0))),
+            Location::from((0.0, Vector3::new(1.0, 0.0, 0.0))),
+            Location::from((1.0, Vector3::new(2.0, 0.0, 0.0))),
+            Location::from((0.5, Vector3::new(1.5, 0.0, 0.0))),
         ]);
         assert_eq!(
             single_obs.count(),
@@ -334,9 +334,9 @@ mod tests {
         );
 
         // Create multi-observer configuration by combining
-        let conf1 = ConfSeries::from_iter([BasicConf::from((0.0, Vector3::new(1.0, 0.0, 0.0)))]);
-        let conf2 = ConfSeries::from_iter([BasicConf::from((1.0, Vector3::new(2.0, 0.0, 0.0)))]);
-        let conf3 = ConfSeries::from_iter([BasicConf::from((0.5, Vector3::new(1.5, 0.0, 0.0)))]);
+        let conf1 = ConfSeries::from_iter([Location::from((0.0, Vector3::new(1.0, 0.0, 0.0)))]);
+        let conf2 = ConfSeries::from_iter([Location::from((1.0, Vector3::new(2.0, 0.0, 0.0)))]);
+        let conf3 = ConfSeries::from_iter([Location::from((0.5, Vector3::new(1.5, 0.0, 0.0)))]);
 
         let combined = (conf1 + conf2) + conf3;
         assert_eq!(

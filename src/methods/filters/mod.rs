@@ -14,7 +14,8 @@ use crate::{
 use derive_builder::Builder;
 use log::{debug, info};
 use nalgebra::{Const, DVector, Dyn, MatrixView, OMatrix, RealField, SVectorView, Scalar};
-use prodef::{Density, SamplingMode};
+use prodef::Density;
+use rand::{RngExt, SeedableRng};
 use rand_distr::{Distribution, StandardNormal};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -266,17 +267,18 @@ where
     /// - **TimeLimitPredicted**: Predicted to exceed time limit
     /// - **EffectiveParticles**: Too few particles accepted (degeneracy)
     /// - **Model**: Forward model error (coordinate transform failed, etc.)
-    pub fn filter<FF, OF, G, NM>(
+    pub fn filter<FF, OF, R, G, NM>(
         &mut self,
         flt_func: &FF,
         obs_func: &OF,
         pdf: G,
-        opt_noise: &mut Option<&mut NM>,
-        seed_multiplier: u64,
+        rng: &mut R,
+        opt_noise: Option<&NM>,
     ) -> Result<(Vec<T>, usize), FilterError<T>>
     where
         FF: Fn(&[OD], &[OD]) -> (bool, T) + Sync,
         OF: Fn(&M, &OC, &SVectorView<T, P>, &M::FMST, &M::CSST) -> Result<OD, ModelError<T>> + Sync,
+        R: RngExt + SeedableRng + Send + Sync,
         G: Density<T, Const<P>> + Sync,
         NM: Noise<OD>,
     {
@@ -307,18 +309,16 @@ where
 
         // Iterate until we have enough new particles.
         while counter != self.ensbl.len() {
-            self.model.initialize_ensbl(
-                &mut temp_ensbl,
-                pdf.clone(),
-                &self.settings.sampling_mode,
-                self.random_seed + seed_multiplier * iteration as u64,
-            )?;
+            self.model
+                .initialize_ensbl(&mut temp_ensbl, pdf.clone(), rng)?;
+
+            let mut sub_rng = rng.fork();
 
             self.model.simulate_ensbl_par(
                 &mut temp_ensbl,
                 &mut temp_obs_ensbl,
                 obs_func,
-                opt_noise,
+                opt_noise.map(|noise| (noise, &mut sub_rng)),
             )?;
 
             let mut filter_flags = vec![true; temp_ensbl.len()];
@@ -381,7 +381,10 @@ where
             iteration += 1;
 
             // Abort if simulation time is above the given limit (or is estimated to be above).
-            if start.elapsed().as_millis() as f64 / 1e3 > self.settings.simulation_time_limit {
+            // Additional condition that abort only occurs if not enough particles have been assembled.
+            if start.elapsed().as_millis() as f64 / 1e3 > self.settings.simulation_time_limit
+                && counter < self.ensbl.len()
+            {
                 info!(
                     "filter aborted\n\tran {:2.3}M evaluations in {:.2} sec\n\tcollected samples = {:.1} / {}",
                     (iteration
@@ -442,13 +445,15 @@ where
     }
 
     /// Initialize the ensemble from a prior distribution `pdf` with a filtering function `FF`.
-    pub fn initialize<G, FF, OF>(
+    pub fn initialize<R, G, FF, OF>(
         &mut self,
         flt_func: &FF,
         obs_func: &OF,
         pdf: G,
+        rng: &mut R,
     ) -> Result<(), FilterError<T>>
     where
+        R: RngExt + SeedableRng + Send + Sync,
         G: Density<T, Const<P>> + Sync,
         FF: Fn(&[OD], &[OD]) -> (bool, T) + Sync,
         OF: Fn(&M, &OC, &SVectorView<T, P>, &M::FMST, &M::CSST) -> Result<OD, ModelError<T>> + Sync,
@@ -457,7 +462,7 @@ where
         let start = Instant::now();
 
         let (filter_values, iterations) =
-            self.filter(flt_func, obs_func, pdf, &mut None::<&mut NullNoise>, 7573)?;
+            self.filter(flt_func, obs_func, pdf, rng, None::<&NullNoise>)?;
 
         // Compute quantiles for logging purposes.
         let quantiles = quantiles(&filter_values, &[0.1587, 0.5, 0.8413]);
@@ -557,14 +562,15 @@ where
     }
 
     /// Simulate the model ensemble and return the results in an observation ensemble.
-    pub fn simulate<OF, NM>(
+    pub fn simulate<R, OF, NM>(
         &mut self,
         opt_obs: Option<&ConfSeries<OC>>,
         opt_ref_data: Option<&DVector<OD>>,
         obs_func: &OF,
-        opt_noise: &mut Option<&mut NM>,
+        opt_noise: Option<(&NM, &mut R)>,
     ) -> Result<EnsembleObservations<OC, OD>, FilterError<T>>
     where
+        R: RngExt + SeedableRng + Send + Sync,
         OF: Fn(&M, &OC, &SVectorView<T, P>, &M::FMST, &M::CSST) -> Result<OD, ModelError<T>> + Sync,
         NM: Noise<OD>,
     {
@@ -702,15 +708,6 @@ where
     /// **Default:** 2.0
     #[builder(default = tval!(2, usize))]
     pub exploration_factor: T,
-
-    /// Rejection sampling configuration with fallback strategy.
-    ///
-    /// Controls behavior when sampling from the proposal distribution.
-    /// If a sample lands outside the prior domain, retry up to max_attempts.
-    ///
-    /// **Default:** Up to 1024 attempts before giving up
-    #[builder(default = SamplingMode::UntilValid { max_attempts: 1024 })]
-    pub sampling_mode: SamplingMode,
 
     /// Maximum filtering iterations (failsafe limit).
     ///

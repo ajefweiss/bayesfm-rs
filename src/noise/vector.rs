@@ -1,7 +1,8 @@
 use nalgebra::allocator::Allocator;
 use nalgebra::{DVectorViewMut, DefaultAllocator, Dyn, RealField, U1};
 use prodef::{Density, MultivariateNormalDensity};
-use rand_distr::{Distribution, StandardNormal};
+use rand::{RngExt, SeedableRng};
+use rand_distr::{Distribution, StandardNormal, StandardUniform};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
@@ -84,8 +85,12 @@ where
     T: RealField,
     DefaultAllocator: Allocator<Dyn> + Allocator<U1, Dyn> + Allocator<Dyn, Dyn>,
     StandardNormal: Distribution<T>,
+    StandardUniform: Distribution<T>,
 {
-    fn add_noise(&self, data: &mut DVectorViewMut<ObsVec<T, N>>, rng: &mut impl rand::RngExt) {
+    fn add_noise<R>(&self, data: &mut DVectorViewMut<ObsVec<T, N>>, rng: &mut R)
+    where
+        R: RngExt + SeedableRng,
+    {
         match self {
             ObsVecNoise::AdditiveNormal(std_dev, ..) => {
                 let normal = StandardNormal;
@@ -101,7 +106,7 @@ where
                     data.iter_mut()
                         .zip(
                             mvnpdf
-                                .sample(rng, &prodef::SamplingMode::UntilValid { max_attempts: 32 })
+                                .sample(rng)
                                 .expect("failed to draw multi normal noise sample")
                                 .row_iter(),
                         )
@@ -118,28 +123,6 @@ where
                         *val += val.clone() * rng.sample(normal) * std_dev.clone();
                     })
                 });
-            }
-        }
-    }
-
-    fn get_random_seed(&self) -> u64 {
-        match self {
-            ObsVecNoise::AdditiveNormal(.., seed) => *seed,
-            ObsVecNoise::AdditiveMultiNormal(.., seed) => *seed,
-            ObsVecNoise::MultiplicativeNormal(.., seed) => *seed,
-        }
-    }
-
-    fn increment_random_seed(&mut self) {
-        match self {
-            ObsVecNoise::AdditiveNormal(.., seed) => {
-                *seed += 1;
-            }
-            ObsVecNoise::AdditiveMultiNormal(.., seed) => {
-                *seed += 1;
-            }
-            ObsVecNoise::MultiplicativeNormal(.., seed) => {
-                *seed += 1;
             }
         }
     }

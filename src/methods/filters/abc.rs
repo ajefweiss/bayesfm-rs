@@ -9,7 +9,8 @@ use crate::{
 use log::debug;
 use nalgebra::{Const, RealField, SVector, SVectorView, Scalar, U1};
 use prodef::{Density, Domain, MultivariateNormalDensity, ParticleDensity};
-use rand_distr::{Distribution, StandardNormal, uniform::SampleUniform};
+use rand::{RngExt, SeedableRng, rngs::Xoshiro256PlusPlus};
+use rand_distr::{Distribution, StandardNormal, StandardUniform, uniform::SampleUniform};
 use rayon::prelude::*;
 use std::{iter::Sum, ops::Sub, time::Instant};
 
@@ -23,18 +24,21 @@ where
     M::FMST: Clone + std::fmt::Debug + Default + Send,
     M::CSST: Clone + std::fmt::Debug + Default + Send,
     StandardNormal: Distribution<T>,
+    StandardUniform: Distribution<T>,
 {
     /// A single iteration of an approximate Bayesian Computation particle filter algorithm using a multinormal kernel.
-    /// 
+    ///
     /// Alternatively one can specify to only use a subset of the dimensions for the kernel (blocked filter), which can be useful if some dimensions are more informative than others or if the number of parameters is large.
-    pub fn abc_mvnk<EF, OF, NM>(
+    pub fn abc_mvnk<R, EF, OF, NM>(
         &mut self,
         err_func: (&EF, T),
         obs_func: &OF,
         opt_dims: Option<&[usize]>,
-        noise: &mut NM,
+        rng: &mut R,
+        noise: &NM,
     ) -> Result<T, FilterError<T>>
     where
+        R: RngExt + SeedableRng + Send + Sync,
         EF: Fn(&[ObsVec<T, N>], &[ObsVec<T, N>]) -> T + Sync,
         OF: Fn(
                 &M,
@@ -72,12 +76,12 @@ where
         mvnk.mean = SVector::zeros();
 
         if let Some(dims) = opt_dims {
-            for mvnk_dim in 0..mvnk.ndims() {
+            for mvnk_dim in 0..mvnk.ndim() {
                 if !dims.contains(&mvnk_dim) {
                     mvnk.set_zero(mvnk_dim);
-                } 
+                }
             }
-        }   
+        }
 
         let ptpdf = ParticleDensity::from_vectors::<U1, Const<P>>(
             &old_params.as_view(),
@@ -88,7 +92,7 @@ where
         .unwrap();
 
         let (filter_values, iterations) =
-            match self.filter(&flt_func, obs_func, &ptpdf, &mut Some(noise), 6361) {
+            match self.filter(&flt_func, obs_func, &ptpdf, rng, Some(noise)) {
                 Ok(result) => result,
                 Err(err) => {
                     // Restore previous particles.
@@ -164,7 +168,7 @@ where
             &mut self.ensbl,
             &mut self.obs_ensbl,
             obs_func,
-            &mut None::<&mut NullNoise>,
+            None::<(&NullNoise, &mut Xoshiro256PlusPlus)>,
         )?;
 
         self.errors = self.obs_ensbl.errors_func(err_func.0);
@@ -176,16 +180,17 @@ where
         Ok(ess)
     }
 
-
     /// A loop of approximate Bayesian Computation particle filtering steps with various aborting criteria.
-    pub fn abc_mvnk_loop<NM, EF, OF>(
+    pub fn abc_mvnk_loop<R, NM, EF, OF>(
         &mut self,
         err_func: &EF,
         obs_func: &OF,
         error_quantile: f64,
-        noise: &mut NM,
+        rng: &mut R,
+        noise: &NM,
     ) -> Result<(Vec<T>, Vec<T>), FilterError<T>>
     where
+        R: RngExt + SeedableRng + Send + Sync,
         NM: Noise<ObsVec<T, N>>,
         EF: Fn(&[ObsVec<T, N>], &[ObsVec<T, N>]) -> T + Sync,
         OF: Fn(
@@ -208,7 +213,7 @@ where
         for _ in 0..self.settings.max_iterations {
             let threshold = self.error_quantile(error_quantile).unwrap();
 
-            let result = self.abc_mvnk((err_func, threshold.clone()), obs_func, None,noise);
+            let result = self.abc_mvnk((err_func, threshold.clone()), obs_func, None, rng, noise);
 
             match result {
                 Ok(new_ess) => {
